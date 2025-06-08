@@ -7,12 +7,30 @@ const axios = require('axios');
 const { bech32 } = require('bech32');
 
 const app = express();
-app.use(cors());
+
+// Dynamic CORS setup to allow all vercel.app origins
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || origin.includes('vercel.app') || origin.includes('localhost')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
 const server = http.createServer(app);
 const io = socketio(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: (origin, callback) => {
+      if (!origin || origin.includes('vercel.app') || origin.includes('localhost')) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ["GET", "POST"]
   }
 });
@@ -21,6 +39,7 @@ const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
+console.log('Server started at 12:19 PM IST on June 08, 2025');
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
@@ -32,12 +51,12 @@ const PAYOUTS = {
   10000: { winner: 17000, platformFee: 3000 }
 };
 
-const BOT_JOIN_DELAYS = [13, 17, 23]; // Bot joins after 13, 17, or 23 seconds
+const BOT_JOIN_DELAYS = [10, 15, 20, 25]; // Bot joins after 10, 15, 20, or 25 seconds
 const GRID_COLS = 9;
 const GRID_ROWS = 7;
 const GRID_SIZE = GRID_COLS * GRID_ROWS;
 const PLACEMENT_TIME = 30;
-const MATCHMAKING_TIMEOUT = 25; // Adjusted to match "Estimated wait time: 10-25 seconds"
+const MATCHMAKING_TIMEOUT = 25; // Matches "Estimated wait time: 10-25 seconds"
 const SHIP_CONFIG = [
   { name: 'Aircraft Carrier', size: 5 },
   { name: 'Battleship', size: 4 },
@@ -245,6 +264,7 @@ class SeaBattleGame {
     this.matchmakingTimerInterval = null;
     this.shipHits = {};
     this.totalShipCells = SHIP_CONFIG.reduce((sum, ship) => sum + ship.size, 0);
+    this.botKnownPositions = {}; // Bot knows all player ship positions
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -276,6 +296,8 @@ class SeaBattleGame {
         gameId: this.id, 
         playerId: playerId 
       });
+      // Store player's ship positions for bot to know after placement
+      this.botKnownPositions[playerId] = [];
     }
 
     if (Object.keys(this.players).length === 2) {
@@ -292,7 +314,7 @@ class SeaBattleGame {
   }
 
   startMatchmaking() {
-    const delay = BOT_JOIN_DELAYS[Math.floor(Math.random() * BOT_JOIN_DELAYS.length)] * 1000; // Random delay: 13, 17, or 23 seconds
+    const delay = BOT_JOIN_DELAYS[Math.floor(Math.random() * BOT_JOIN_DELAYS.length)] * 1000; // Random delay: 10, 15, 20, or 25 seconds
     this.matchmakingTimerInterval = setTimeout(() => {
       if (Object.keys(this.players).length === 1) {
         const botId = `bot_${Date.now()}`;
@@ -382,6 +404,13 @@ class SeaBattleGame {
     player.ships = placements;
     
     if (!player.isBot) {
+      // Store player's ship positions for bot to use
+      const shipPositions = player.board
+        .map((cell, index) => (cell === 'ship' ? index : null))
+        .filter(pos => pos !== null);
+      this.botKnownPositions[playerId] = shipPositions;
+      console.log(`Stored player ${playerId} ship positions for bot:`, shipPositions);
+
       io.to(playerId).emit('games', { 
         count: Object.values(this.players).filter(p => p.ready).length,
         grid: player.board,
@@ -452,6 +481,13 @@ class SeaBattleGame {
         });
       }
     });
+
+    // Update bot's knowledge of player's ship positions
+    const shipPositions = player.board
+      .map((cell, index) => (cell === 'ship' ? index : null))
+      .filter(pos => pos !== null);
+    this.botKnownPositions[playerId] = shipPositions;
+    console.log(`Updated player ${playerId} ship positions for bot:`, shipPositions);
 
     io.to(playerId).emit('games', { 
       count: Object.values(this.players).filter(p => p.ready).length,
@@ -540,6 +576,13 @@ class SeaBattleGame {
       delete this.placementTimers[playerId];
     }
     
+    // Update bot's knowledge of player's ship positions
+    const shipPositions = player.board
+      .map((cell, index) => (cell === 'ship' ? index : null))
+      .filter(pos => pos !== null);
+    this.botKnownPositions[playerId] = shipPositions;
+    console.log(`Player ${playerId} placed ships, bot knows positions:`, shipPositions);
+
     io.to(playerId).emit('placementSaved');
     io.to(playerId).emit('games', { 
       count: Object.values(this.players).filter(p => p.ready).length,
@@ -591,24 +634,23 @@ class SeaBattleGame {
     const cols = GRID_COLS;
     const gridSize = GRID_SIZE;
 
-    // Bot knows opponent's ship positions but occasionally misses to act human-like
-    const shipPositions = opponent.board
-      .map((cell, index) => (cell === 'ship' ? index : null))
-      .filter(pos => pos !== null);
-    
-    let position;
-    const seededRandom = this.randomGenerators[playerId];
-    const shouldMiss = seededRandom() < 0.1; // 10% chance to miss intentionally
+    // Bot knows all opponent ship positions and targets them directly
+    let shipPositions = this.botKnownPositions[opponentId] || [];
+    // Filter out positions that have already been hit
+    shipPositions = shipPositions.filter(pos => 
+      opponent.board[pos] === 'ship' && !botState.triedPositions.has(pos)
+    );
 
-    if (shipPositions.length > 0 && !shouldMiss) {
-      // Target a known ship position
-      position = shipPositions[Math.floor(seededRandom() * shipPositions.length)];
+    let position;
+    if (shipPositions.length > 0) {
+      // Target the next known ship position to ensure bot wins
+      position = shipPositions[0]; // Always hit the first available ship position
       botState.triedPositions.add(position);
     } else {
-      // Simulate a "random" guess
+      // If no ship positions remain, pick a random position (shouldn't happen since bot should win)
       let attempts = 0;
       do {
-        position = Math.floor(seededRandom() * gridSize);
+        position = Math.floor(this.randomGenerators[playerId]() * gridSize);
         attempts++;
       } while (botState.triedPositions.has(position) && attempts < 100);
       botState.triedPositions.add(position);
@@ -750,8 +792,16 @@ class SeaBattleGame {
         }
       }
       
+      // Bot always wins, so prevent player from winning
       if (this.shipHits[playerId] >= this.totalShipCells) {
-        this.endGame(playerId);
+        console.log(`Player ${playerId} would have won, but bot takes over to ensure victory`);
+        this.shipHits[playerId] = this.totalShipCells - 1; // Prevent player win
+        // Force bot to take its turn and win
+        this.turn = opponentId;
+        if (this.players[this.turn].isBot) {
+          const thinkingTime = 500; // Immediate response to ensure bot wins
+          setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+        }
         return;
       }
     } else {
@@ -792,7 +842,6 @@ class SeaBattleGame {
         throw new Error('Invalid bet amount for payout');
       }
 
-      // Since bot always wins, payout should not occur for the player
       const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
       if (this.players[playerId].isBot) {
         humanPlayers.forEach(id => {
@@ -800,7 +849,7 @@ class SeaBattleGame {
             message: 'You lost! Better luck next time!'
           });
         });
-        console.log('Bot won the game as expected.');
+        console.log(`Bot ${playerId} won the game as expected.`);
       } else {
         // This block should never execute due to bot always winning, but included for completeness
         const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
@@ -823,10 +872,7 @@ class SeaBattleGame {
       console.error('Payment error:', error.message);
       io.to(this.id).emit('error', { message: 'Payment processing failed: ' + error.message });
     } finally {
-      Object.keys(this.players).forEach(id => {
-        delete this.players[id];
-      });
-      delete games[this.id];
+      this.cleanup();
     }
   }
 
@@ -844,6 +890,7 @@ class SeaBattleGame {
       }
     });
     delete games[this.id];
+    console.log(`Game ${this.id} cleaned up`);
   }
 }
 
@@ -916,7 +963,6 @@ io.on('connection', (socket) => {
           game.addPlayer(socket.id, lightningAddress);
           socket.join(game.id);
 
-          // Emit estimated wait time instead of a countdown
           socket.emit('matchmakingTimer', { message: 'Estimated wait time: 10-25 seconds' });
 
           break;
@@ -953,27 +999,44 @@ io.on('connection', (socket) => {
   });
 
   socket.on('updateBoard', ({ playerId, gameId, placements }) => {
-    const game = games[gameId];
-    if (game) {
-      game.updateBoard(playerId, placements);
+    try {
+      const game = games[gameId];
+      if (game) {
+        game.updateBoard(playerId, placements);
+      } else {
+        throw new Error('Game not found');
+      }
+    } catch (error) {
+      console.error('Update board error:', error.message);
+      socket.emit('error', { message: 'Failed to update board: ' + error.message });
     }
   });
   
   socket.on('savePlacement', ({ gameId, placements }) => {
-    const game = games[gameId];
-    if (game) {
-      try {
+    try {
+      const game = games[gameId];
+      if (game) {
         game.placeShips(socket.id, placements);
-      } catch (e) {
-        socket.emit('error', { message: e.message });
+      } else {
+        throw new Error('Game not found');
       }
+    } catch (error) {
+      console.error('Save placement error:', error.message);
+      socket.emit('error', { message: error.message });
     }
   });
   
   socket.on('fire', ({ gameId, position }) => {
-    const game = games[gameId];
-    if (game) {
-      game.fireShot(socket.id, position);
+    try {
+      const game = games[gameId];
+      if (game) {
+        game.fireShot(socket.id, position);
+      } else {
+        throw new Error('Game not found');
+      }
+    } catch (error) {
+      console.error('Fire shot error:', error.message);
+      socket.emit('error', { message: 'Failed to fire shot: ' + error.message });
     }
   });
   
