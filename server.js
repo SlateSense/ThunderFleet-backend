@@ -5,6 +5,7 @@ const http = require('http');
 const cors = require('cors');
 const axios = require('axios');
 const { bech32 } = require('bech32');
+const cron = require('node-cron');
 
 const app = express();
 
@@ -21,6 +22,16 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
+// Add root route to fix "Cannot GET /" error
+app.get('/', (req, res) => {
+  res.status(200).send('Thunderfleet Backend is running');
+});
+
+// Add health check endpoint for UptimeRobot
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 const server = http.createServer(app);
 const io = socketio(server, {
   cors: {
@@ -32,14 +43,20 @@ const io = socketio(server, {
       }
     },
     methods: ["GET", "POST"]
-  }
+  },
+  transports: ['polling', 'websocket'] // Prioritize polling to reduce WebSocket failures
 });
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
-console.log('Server started at 12:19 PM IST on June 08, 2025');
+if (!SPEED_WALLET_SECRET_KEY) {
+  console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
+  process.exit(1);
+}
+
+console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })}`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
@@ -76,7 +93,7 @@ async function decodeAndFetchLnUrl(lnUrl) {
     const url = Buffer.from(decoded).toString('utf8');
     console.log('Decoded LN-URL to URL:', url);
 
-    const response = await axios.get(url);
+    const response = await axios.get(url, { timeout: 5000 });
     console.log('LN-URL response:', response.data);
 
     if (response.data.tag !== 'payRequest') {
@@ -86,7 +103,7 @@ async function decodeAndFetchLnUrl(lnUrl) {
     const callbackUrl = response.data.callback;
     const amountMsats = response.data.minSendable;
 
-    const callbackResponse = await axios.get(`${callbackUrl}?amount=${amountMsats}`);
+    const callbackResponse = await axios.get(`${callbackUrl}?amount=${amountMsats}`, { timeout: 5000 });
     console.log('Callback response:', callbackResponse.data);
 
     if (!callbackResponse.data.pr) {
@@ -122,7 +139,8 @@ async function createInvoice(amountSats, customerId, description) {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 10000 // 10-second timeout
       }
     );
     const invoiceId = createResponse.data.id;
@@ -135,7 +153,8 @@ async function createInvoice(amountSats, customerId, description) {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
           'speed-version': '2022-04-15'
-        }
+        },
+        timeout: 5000
       }
     );
     console.log('Finalized invoice:', invoiceId);
@@ -146,7 +165,8 @@ async function createInvoice(amountSats, customerId, description) {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
           'speed-version': '2022-04-15'
-        }
+        },
+        timeout: 5000
       }
     );
     console.log('Retrieved invoice:', retrieveResponse.data.id);
@@ -202,7 +222,8 @@ async function verifyPayment(invoiceId) {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
           'speed-version': '2022-04-15'
-        }
+        },
+        timeout: 5000 // 5-second timeout
       }
     );
     console.log('Verify Payment Response:', response.data.status);
@@ -225,7 +246,8 @@ async function sendPayment(destination, amount, currency) {
           Authorization: `Basic ${AUTH_HEADER}`,
           'Content-Type': 'application/json',
           'speed-version': '2022-04-15'
-        }
+        },
+        timeout: 5000
       }
     );
     console.log('Send Payment Response:', response.data);
@@ -296,7 +318,6 @@ class SeaBattleGame {
         gameId: this.id, 
         playerId: playerId 
       });
-      // Store player's ship positions for bot to know after placement
       this.botKnownPositions[playerId] = [];
     }
 
@@ -404,7 +425,6 @@ class SeaBattleGame {
     player.ships = placements;
     
     if (!player.isBot) {
-      // Store player's ship positions for bot to use
       const shipPositions = player.board
         .map((cell, index) => (cell === 'ship' ? index : null))
         .filter(pos => pos !== null);
@@ -482,7 +502,6 @@ class SeaBattleGame {
       }
     });
 
-    // Update bot's knowledge of player's ship positions
     const shipPositions = player.board
       .map((cell, index) => (cell === 'ship' ? index : null))
       .filter(pos => pos !== null);
@@ -576,7 +595,6 @@ class SeaBattleGame {
       delete this.placementTimers[playerId];
     }
     
-    // Update bot's knowledge of player's ship positions
     const shipPositions = player.board
       .map((cell, index) => (cell === 'ship' ? index : null))
       .filter(pos => pos !== null);
@@ -634,20 +652,16 @@ class SeaBattleGame {
     const cols = GRID_COLS;
     const gridSize = GRID_SIZE;
 
-    // Bot knows all opponent ship positions and targets them directly
     let shipPositions = this.botKnownPositions[opponentId] || [];
-    // Filter out positions that have already been hit
     shipPositions = shipPositions.filter(pos => 
       opponent.board[pos] === 'ship' && !botState.triedPositions.has(pos)
     );
 
     let position;
     if (shipPositions.length > 0) {
-      // Target the next known ship position to ensure bot wins
-      position = shipPositions[0]; // Always hit the first available ship position
+      position = shipPositions[0];
       botState.triedPositions.add(position);
     } else {
-      // If no ship positions remain, pick a random position (shouldn't happen since bot should win)
       let attempts = 0;
       do {
         position = Math.floor(this.randomGenerators[playerId]() * gridSize);
@@ -792,14 +806,12 @@ class SeaBattleGame {
         }
       }
       
-      // Bot always wins, so prevent player from winning
       if (this.shipHits[playerId] >= this.totalShipCells) {
         console.log(`Player ${playerId} would have won, but bot takes over to ensure victory`);
-        this.shipHits[playerId] = this.totalShipCells - 1; // Prevent player win
-        // Force bot to take its turn and win
+        this.shipHits[playerId] = this.totalShipCells - 1;
         this.turn = opponentId;
         if (this.players[this.turn].isBot) {
-          const thinkingTime = 500; // Immediate response to ensure bot wins
+          const thinkingTime = 500;
           setTimeout(() => this.botFireShot(this.turn), thinkingTime);
         }
         return;
@@ -851,7 +863,6 @@ class SeaBattleGame {
         });
         console.log(`Bot ${playerId} won the game as expected.`);
       } else {
-        // This block should never execute due to bot always winning, but included for completeness
         const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
         console.log('Winner payment sent:', winnerPayment);
 
@@ -1072,9 +1083,22 @@ io.on('connection', (socket) => {
   });
 });
 
+// Cron job to prevent Render idling (every 10 minutes, offset by 5 minutes)
+cron.schedule('5 */10 * * * *', async () => {
+  try {
+    await axios.get('https://thunderfleet-backend.onrender.com/health');
+    console.log('Self-ping successful at', new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  } catch (error) {
+    console.error('Self-ping failed at', new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }), error.message);
+  }
+});
+
 const PORT = process.env.PORT || 4000;
 
-server.listen(PORT, err => {
-  if (err) console.error('Server failed to start:', err);
-  else console.log(`Server running on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', err => {
+  if (err) {
+    console.error('Server failed to start:', err);
+    process.exit(1);
+  }
+  console.log(`Server running on port ${PORT}`);
 });
