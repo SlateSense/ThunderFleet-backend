@@ -1,9 +1,10 @@
 {
-  "name": "sea-battle",
+  "name": "thunderfleet",
   "version": "1.0.0",
-  "main": "test.js",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "pm2 start server.js --name thunderfleet-backend --watch",
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
@@ -20,8 +21,13 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "http": "^0.0.1-security",
+    "node-cron": "^3.0.3",
+    "pm2": "^5.3.1",
     "qrcode.react": "^4.2.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
   }
 }
