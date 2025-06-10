@@ -1,13 +1,29 @@
 require('dotenv').config();
+console.log('Debug-2025-06-10-2: dotenv loaded');
+
 const express = require('express');
+console.log('Debug-2025-06-10-2: express loaded');
+
 const socketio = require('socket.io');
+console.log('Debug-2025-06-10-2: socket.io loaded');
+
 const http = require('http');
+console.log('Debug-2025-06-10-2: http loaded');
+
 const cors = require('cors');
+console.log('Debug-2025-06-10-2: cors loaded');
+
 const axios = require('axios');
+console.log('Debug-2025-06-10-2: axios loaded');
+
 const { bech32 } = require('bech32');
+console.log('Debug-2025-06-10-2: bech32 loaded');
+
 const cron = require('node-cron');
+console.log('Debug-2025-06-10-2: node-cron loaded');
 
 const app = express();
+console.log('Debug-2025-06-10-2: express app created');
 
 // Dynamic CORS setup to allow all vercel.app origins
 app.use(cors({
@@ -21,18 +37,23 @@ app.use(cors({
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
+console.log('Debug-2025-06-10-2: CORS middleware applied');
 
 // Add root route to fix "Cannot GET /" error
 app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
+console.log('Debug-2025-06-10-2: Root route added');
 
 // Add health check endpoint for UptimeRobot
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
+console.log('Debug-2025-06-10-2: Health route added');
 
 const server = http.createServer(app);
+console.log('Debug-2025-06-10-2: HTTP server created');
+
 const io = socketio(server, {
   cors: {
     origin: (origin, callback) => {
@@ -46,21 +67,20 @@ const io = socketio(server, {
   },
   transports: ['polling', 'websocket'] // Prioritize polling to reduce WebSocket failures
 });
+console.log('Debug-2025-06-10-2: Socket.IO initialized');
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
-// Add initial debug log to confirm server start
-console.log('Starting server... Debug-2025-06-10-1');
+console.log('Starting server... Debug-2025-06-10-2');
 
 if (!SPEED_WALLET_SECRET_KEY) {
   console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
   process.exit(1);
 }
 
-// Log server start time and environment details
-console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-10-1)`);
+console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-10-2)`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 console.log('Environment PORT:', process.env.PORT || 'Not set, using fallback 4000');
