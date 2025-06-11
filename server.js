@@ -1,30 +1,42 @@
 // @ts-nocheck
 require('dotenv').config();
-console.log('Debug-2025-06-10-2: dotenv loaded');
+console.log('Debug-2025-06-11-1: dotenv loaded');
 
 const express = require('express');
-console.log('Debug-2025-06-10-2: express loaded');
+console.log('Debug-2025-06-11-1: express loaded');
 
 const socketio = require('socket.io');
-console.log('Debug-2025-06-10-2: socket.io loaded');
+console.log('Debug-2025-06-11-1: socket.io loaded');
 
 const http = require('http');
-console.log('Debug-2025-06-10-2: http loaded');
+console.log('Debug-2025-06-11-1: http loaded');
 
 const cors = require('cors');
-console.log('Debug-2025-06-10-2: cors loaded');
+console.log('Debug-2025-06-11-1: cors loaded');
 
 const axios = require('axios');
-console.log('Debug-2025-06-10-2: axios loaded');
+console.log('Debug-2025-06-11-1: axios loaded');
 
 const { bech32 } = require('bech32');
-console.log('Debug-2025-06-10-2: bech32 loaded');
+console.log('Debug-2025-06-11-1: bech32 loaded');
 
 const cron = require('node-cron');
-console.log('Debug-2025-06-10-2: node-cron loaded');
+console.log('Debug-2025-06-11-1: node-cron loaded');
+
+const fs = require('fs').promises;
+console.log('Debug-2025-06-11-1: fs loaded');
+
+const path = require('path');
+console.log('Debug-2025-06-11-1: path loaded');
+
+const crypto = require('crypto');
+console.log('Debug-2025-06-11-1: crypto loaded');
+
+const rateLimit = require('express-rate-limit');
+console.log('Debug-2025-06-11-1: express-rate-limit loaded');
 
 const app = express();
-console.log('Debug-2025-06-10-2: express app created');
+console.log('Debug-2025-06-11-1: express app created');
 
 // Dynamic CORS setup to allow all vercel.app origins
 app.use(cors({
@@ -36,24 +48,136 @@ app.use(cors({
     }
   },
   methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
 }));
-console.log('Debug-2025-06-10-2: CORS middleware applied');
+console.log('Debug-2025-06-11-1: CORS middleware applied');
+
+// Parse JSON bodies for webhook
+app.use(express.json());
+
+// Rate limit for webhook endpoint
+const webhookLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // Limit to 100 requests per window
+});
+console.log('Debug-2025-06-11-1: Rate limiter configured');
 
 // Add root route to fix "Cannot GET /" error
 app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
-console.log('Debug-2025-06-10-2: Root route added');
+console.log('Debug-2025-06-11-1: Root route added');
 
 // Add health check endpoint for UptimeRobot
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
-console.log('Debug-2025-06-10-2: Health route added');
+console.log('Debug-2025-06-11-1: Health route added');
+
+// Add endpoint to download logs
+const LOG_FILE = path.join(__dirname, 'payment_logs.txt');
+app.get('/logs', async (req, res) => {
+  try {
+    const data = await fs.readFile(LOG_FILE);
+    res.set('Content-Type', 'text/plain');
+    res.send(data);
+  } catch (err) {
+    res.status(500).send('Error reading log file');
+  }
+});
+console.log('Debug-2025-06-11-1: Logs route added');
+
+// Webhook endpoint to receive events from Speed Wallet
+app.post('/webhook', webhookLimiter, async (req, res) => {
+  const signature = req.headers['x-webhook-signature'];
+  const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret'; // Set this in your Render environment variables
+  const computedSignature = crypto
+    .createHmac('sha256', WEBHOOK_SECRET)
+    .update(JSON.stringify(req.body))
+    .digest('hex');
+
+  if (signature !== computedSignature) {
+    console.error('Invalid webhook signature');
+    await logPaymentActivity('Invalid webhook signature received');
+    return res.status(400).send('Invalid signature');
+  }
+
+  const event = req.body;
+  console.log('Received webhook:', event);
+  await logPaymentActivity(`Webhook received: ${JSON.stringify(event)}`);
+
+  // Map of invoice IDs to player sockets for payment verification
+  const invoiceToSocket = {};
+
+  try {
+    switch (event.type) {
+      case 'invoice_paid':
+      case 'payment_succeeded':
+        const invoiceId = event.invoiceId || event.data?.invoiceId;
+        if (!invoiceId) {
+          throw new Error('No invoiceId in webhook payload');
+        }
+
+        const socket = invoiceToSocket[invoiceId];
+        if (!socket) {
+          throw new Error(`No socket found for invoice ${invoiceId}`);
+        }
+
+        socket.emit('paymentVerified');
+        players[socket.id].paid = true;
+        await logPaymentActivity(`Payment verified for player ${socket.id} via webhook: ${invoiceId}`);
+
+        let game = Object.values(games).find(g => 
+          Object.keys(g.players).length === 1 && g.betAmount === players[socket.id].betAmount
+        );
+        
+        if (!game) {
+          const gameId = `game_${Date.now()}`;
+          game = new SeaBattleGame(gameId, players[socket.id].betAmount);
+          games[gameId] = game;
+        }
+        
+        game.addPlayer(socket.id, players[socket.id].lightningAddress);
+        socket.join(game.id);
+
+        socket.emit('matchmakingTimer', { message: 'Estimated wait time: 10-25 seconds' });
+        delete invoiceToSocket[invoiceId];
+        break;
+
+      case 'payment_failed':
+        const failedInvoiceId = event.invoiceId || event.data?.invoiceId;
+        if (!failedInvoiceId) {
+          throw new Error('No invoiceId in webhook payload');
+        }
+
+        const failedSocket = invoiceToSocket[failedInvoiceId];
+        if (failedSocket) {
+          failedSocket.emit('error', { message: 'Payment failed. Please try again.' });
+          await logPaymentActivity(`Payment failed for player ${failedSocket.id}: ${failedInvoiceId}`);
+          delete players[failedSocket.id];
+          delete invoiceToSocket[failedInvoiceId];
+        }
+        break;
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
+        await logPaymentActivity(`Unhandled webhook event type: ${event.type}`);
+    }
+
+    res.status(200).send('Webhook received');
+  } catch (error) {
+    console.error('Webhook error:', error.message);
+    await logPaymentActivity(`Webhook error: ${error.message}`);
+    res.status(500).send('Webhook processing failed');
+  }
+
+  // Attach invoiceToSocket to io for access in 'joinGame'
+  io.invoiceToSocket = invoiceToSocket;
+});
+console.log('Debug-2025-06-11-1: Webhook route added');
 
 const server = http.createServer(app);
-console.log('Debug-2025-06-10-2: HTTP server created');
+console.log('Debug-2025-06-11-1: HTTP server created');
 
 const io = socketio(server, {
   cors: {
@@ -68,20 +192,20 @@ const io = socketio(server, {
   },
   transports: ['polling', 'websocket'] // Prioritize polling to reduce WebSocket failures
 });
-console.log('Debug-2025-06-10-2: Socket.IO initialized');
+console.log('Debug-2025-06-11-1: Socket.IO initialized');
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
-console.log('Starting server... Debug-2025-06-10-2');
+console.log('Starting server... Debug-2025-06-11-1');
 
 if (!SPEED_WALLET_SECRET_KEY) {
   console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
   process.exit(1);
 }
 
-console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-10-2)`);
+console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-11-1)`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
@@ -109,6 +233,18 @@ const SHIP_CONFIG = [
 
 const games = {};
 const players = {};
+
+// Function to log payment activity
+const logPaymentActivity = async (message) => {
+  const timestamp = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+  const logMessage = `[${timestamp}] ${message}\n`;
+  try {
+    await fs.appendFile(LOG_FILE, logMessage);
+    console.log('Logged to file:', logMessage.trim());
+  } catch (err) {
+    console.error('Error writing to log file:', err.message);
+  }
+};
 
 async function decodeAndFetchLnUrl(lnUrl) {
   try {
@@ -235,28 +371,6 @@ async function createInvoice(amountSats, customerId, description) {
       details: errorDetails
     });
     throw new Error(`Failed to create invoice: ${errorMessage} (Status: ${errorStatus})`);
-  }
-}
-
-async function verifyPayment(invoiceId) {
-  try {
-    console.log('Verifying payment for invoice:', invoiceId);
-    const response = await axios.get(
-      `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}`,
-      {
-        headers: {
-          Authorization: `Basic ${AUTH_HEADER}`,
-          'speed-version': '2022-04-15'
-        },
-        timeout: 5000 // 5-second timeout
-      }
-    );
-    console.log('Verify Payment Response:', response.data.status);
-    return response.data;
-  } catch (error) {
-    const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
-    console.error('Verify Payment Error:', errorMessage, error.response?.status);
-    throw new Error(`Failed to verify payment: ${errorMessage}`);
   }
 }
 
@@ -886,6 +1000,7 @@ class SeaBattleGame {
             message: 'You lost! Better luck next time!'
           });
         });
+        await logPaymentActivity(`Game ${this.id} ended. Player ${humanPlayers[0]} lost against bot ${playerId}.`);
         console.log(`Bot ${playerId} won the game as expected.`);
       } else {
         const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
@@ -903,10 +1018,15 @@ class SeaBattleGame {
         io.to(this.id).emit('transaction', { 
           message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee} sats total platform fee.`
         });
+
+        await logPaymentActivity(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
+        await logPaymentActivity(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
+        await logPaymentActivity(`Platform fee processed: ${payout.platformFee} SATS to slatesense@tryspeed.com`);
       }
     } catch (error) {
       console.error('Payment error:', error.message);
       io.to(this.id).emit('error', { message: 'Payment processing failed: ' + error.message });
+      await logPaymentActivity(`Payment error in game ${this.id} for player ${playerId}: ${error.message}`);
     } finally {
       this.cleanup();
     }
@@ -941,6 +1061,9 @@ io.on('connection', (socket) => {
         throw new Error('Invalid bet amount');
       }
 
+      // Log deposit attempt
+      await logPaymentActivity(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${lightningAddress}`);
+
       players[socket.id] = { lightningAddress, paid: false, betAmount };
 
       const customerId = 'cus_mbgcu49gfgNyffw9';
@@ -959,67 +1082,39 @@ io.on('connection', (socket) => {
         console.warn('No Lightning invoice available, falling back to hosted URL');
       }
 
-      console.log('Payment Request:', lightningInvoice);
+      console.log('Payment Request:', { lightningInvoice, hostedInvoiceUrl });
       socket.emit('paymentRequest', {
         lightningInvoice: lightningInvoice || hostedInvoiceUrl,
         hostedInvoiceUrl,
         invoiceId: invoiceData.invoiceId
       });
 
-      let paymentVerified = false;
-      let paymentCanceled = false;
-      const maxAttempts = 300; // 5 minutes at 1-second intervals
-      let attempts = 0;
+      // Map the invoice to the socket for webhook handling
+      io.invoiceToSocket[invoiceData.invoiceId] = socket;
 
-      const cancelListener = ({ gameId, playerId }) => {
-        if (playerId === socket.id) {
-          paymentCanceled = true;
+      // Set a timeout for payment (5 minutes)
+      const paymentTimeout = setTimeout(() => {
+        if (!players[socket.id]?.paid) {
+          socket.emit('error', { message: 'Payment not verified within 5 minutes' });
+          delete players[socket.id];
+          delete io.invoiceToSocket[invoiceData.invoiceId];
+          console.log(`Payment timeout for player ${socket.id}, invoice ${invoiceData.invoiceId}`);
+          logPaymentActivity(`Payment timeout for player ${socket.id}: ${invoiceData.invoiceId}`);
         }
-      };
-      socket.on('cancelGame', cancelListener);
+      }, 5 * 60 * 1000);
 
-      while (attempts < maxAttempts && !paymentVerified && !paymentCanceled) {
-        const paymentStatus = await verifyPayment(invoiceData.invoiceId);
-        if (paymentStatus.status === 'paid') {
-          paymentVerified = true;
-          players[socket.id].paid = true;
-          
-          socket.emit('paymentVerified');
-          
-          let game = Object.values(games).find(g => 
-            Object.keys(g.players).length === 1 && g.betAmount === betAmount
-          );
-          
-          if (!game) {
-            const gameId = `game_${Date.now()}`;
-            game = new SeaBattleGame(gameId, betAmount);
-            games[gameId] = game;
-          }
-          
-          game.addPlayer(socket.id, lightningAddress);
-          socket.join(game.id);
+      // Clean up timeout if player cancels
+      socket.on('cancelGame', () => {
+        clearTimeout(paymentTimeout);
+      });
 
-          socket.emit('matchmakingTimer', { message: 'Estimated wait time: 10-25 seconds' });
-
-          break;
-        }
-        attempts++;
-        console.log(`Payment verification attempt ${attempts}/${maxAttempts}: Not paid yet`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-
-      socket.off('cancelGame', cancelListener);
-
-      if (paymentCanceled) {
-        throw new Error('Payment canceled by user');
-      }
-
-      if (!paymentVerified) {
-        throw new Error('Payment not verified within 5 minutes');
-      }
+      socket.on('disconnect', () => {
+        clearTimeout(paymentTimeout);
+      });
     } catch (error) {
       console.error('Join error:', error.message);
       socket.emit('error', { message: 'Failed to join game: ' + error.message });
+      await logPaymentActivity(`Join error for player ${socket.id}: ${error.message}`);
       delete players[socket.id];
     }
   });
