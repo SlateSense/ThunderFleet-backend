@@ -740,7 +740,7 @@ class SeaBattleGame {
           const col = position % cols;
           let nextPos;
           if (botState.direction === 'up') nextPos = position - cols;
-          if (botState.direction === 'down') nextPos = platform + cols;
+          if (botState.direction === 'down') nextPos = position + cols;
           if (botState.direction === 'left') nextPos = position - 1;
           if (botState.direction === 'right') nextPos = position + 1;
 
@@ -1121,5 +1121,5 @@ cron.schedule('5 */10 * * * *', async () => {
 const PORT = process.env.PORT || 4000;
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
+  console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
 });
