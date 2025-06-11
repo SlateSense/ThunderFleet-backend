@@ -1,3 +1,4 @@
+// @ts-nocheck
 require('dotenv').config();
 console.log('Debug-2025-06-10-2: dotenv loaded');
 
@@ -83,7 +84,6 @@ if (!SPEED_WALLET_SECRET_KEY) {
 console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-10-2)`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
-console.log('Environment PORT:', process.env.PORT || 'Not set, using fallback 4000');
 
 const PAYOUTS = {
   300: { winner: 500, platformFee: 100 },
@@ -740,7 +740,7 @@ class SeaBattleGame {
           const col = position % cols;
           let nextPos;
           if (botState.direction === 'up') nextPos = position - cols;
-          if (botState.direction === 'down') nextPos = position + cols;
+          if (botState.direction === 'down') nextPos = platform + cols;
           if (botState.direction === 'left') nextPos = position - 1;
           if (botState.direction === 'right') nextPos = position + 1;
 
@@ -1118,19 +1118,8 @@ cron.schedule('5 */10 * * * *', async () => {
   }
 });
 
-// Prevent multiple server instances (due to double npm start in Render)
-let isServerBound = false;
 const PORT = process.env.PORT || 4000;
 
-if (!isServerBound) {
-  server.listen(PORT, '0.0.0.0', err => {
-    if (err) {
-      console.error('Server failed to start:', err);
-      process.exit(1);
-    }
-    console.log(`Server running on port ${PORT} - Bound successfully`);
-    isServerBound = true;
-  });
-} else {
-  console.log('Server already bound, skipping duplicate listen attempt');
-}
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
+});
