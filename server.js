@@ -1,42 +1,42 @@
 // @ts-nocheck
 require('dotenv').config();
-console.log('Debug-2025-06-11-1: dotenv loaded');
+console.log('Debug-2025-06-12-1: dotenv loaded');
 
 const express = require('express');
-console.log('Debug-2025-06-11-1: express loaded');
+console.log('Debug-2025-06-12-1: express loaded');
 
 const socketio = require('socket.io');
-console.log('Debug-2025-06-11-1: socket.io loaded');
+console.log('Debug-2025-06-12-1: socket.io loaded');
 
 const http = require('http');
-console.log('Debug-2025-06-11-1: http loaded');
+console.log('Debug-2025-06-12-1: http loaded');
 
 const cors = require('cors');
-console.log('Debug-2025-06-11-1: cors loaded');
+console.log('Debug-2025-06-12-1: cors loaded');
 
 const axios = require('axios');
-console.log('Debug-2025-06-11-1: axios loaded');
+console.log('Debug-2025-06-12-1: axios loaded');
 
 const { bech32 } = require('bech32');
-console.log('Debug-2025-06-11-1: bech32 loaded');
+console.log('Debug-2025-06-12-1: bech32 loaded');
 
 const cron = require('node-cron');
-console.log('Debug-2025-06-11-1: node-cron loaded');
+console.log('Debug-2025-06-12-1: node-cron loaded');
 
 const fs = require('fs').promises;
-console.log('Debug-2025-06-11-1: fs loaded');
+console.log('Debug-2025-06-12-1: fs loaded');
 
 const path = require('path');
-console.log('Debug-2025-06-11-1: path loaded');
+console.log('Debug-2025-06-12-1: path loaded');
 
 const crypto = require('crypto');
-console.log('Debug-2025-06-11-1: crypto loaded');
+console.log('Debug-2025-06-12-1: crypto loaded');
 
 const rateLimit = require('express-rate-limit');
-console.log('Debug-2025-06-11-1: express-rate-limit loaded');
+console.log('Debug-2025-06-12-1: express-rate-limit loaded');
 
 const app = express();
-console.log('Debug-2025-06-11-1: express app created');
+console.log('Debug-2025-06-12-1: express app created');
 
 // Dynamic CORS setup to allow all vercel.app origins
 app.use(cors({
@@ -50,7 +50,7 @@ app.use(cors({
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
 }));
-console.log('Debug-2025-06-11-1: CORS middleware applied');
+console.log('Debug-2025-06-12-1: CORS middleware applied');
 
 // Parse JSON bodies for webhook
 app.use(express.json());
@@ -60,19 +60,19 @@ const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100 // Limit to 100 requests per window
 });
-console.log('Debug-2025-06-11-1: Rate limiter configured');
+console.log('Debug-2025-06-12-1: Rate limiter configured');
 
 // Add root route to fix "Cannot GET /" error
 app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
-console.log('Debug-2025-06-11-1: Root route added');
+console.log('Debug-2025-06-12-1: Root route added');
 
 // Add health check endpoint for UptimeRobot
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
-console.log('Debug-2025-06-11-1: Health route added');
+console.log('Debug-2025-06-12-1: Health route added');
 
 // Add endpoint to download logs
 const LOG_FILE = path.join(__dirname, 'payment_logs.txt');
@@ -85,9 +85,11 @@ app.get('/logs', async (req, res) => {
     res.status(500).send('Error reading log file');
   }
 });
-console.log('Debug-2025-06-11-1: Logs route added');
+console.log('Debug-2025-06-12-1: Logs route added');
 
-// Webhook endpoint to receive events from Speed Wallet
+// Global map of invoice IDs to player sockets for payment verification
+const invoiceToSocket = {};
+
 app.post('/webhook', webhookLimiter, async (req, res) => {
   const signature = req.headers['x-webhook-signature'];
   const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret'; // Set this in your Render environment variables
@@ -105,9 +107,6 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
   const event = req.body;
   console.log('Received webhook:', event);
   await logPaymentActivity(`Webhook received: ${JSON.stringify(event)}`);
-
-  // Map of invoice IDs to player sockets for payment verification
-  const invoiceToSocket = {};
 
   try {
     switch (event.type) {
@@ -170,14 +169,11 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
     await logPaymentActivity(`Webhook error: ${error.message}`);
     res.status(500).send('Webhook processing failed');
   }
-
-  // Attach invoiceToSocket to io for access in 'joinGame'
-  io.invoiceToSocket = invoiceToSocket;
 });
-console.log('Debug-2025-06-11-1: Webhook route added');
+console.log('Debug-2025-06-12-1: Webhook route added');
 
 const server = http.createServer(app);
-console.log('Debug-2025-06-11-1: HTTP server created');
+console.log('Debug-2025-06-12-1: HTTP server created');
 
 const io = socketio(server, {
   cors: {
@@ -192,20 +188,20 @@ const io = socketio(server, {
   },
   transports: ['polling', 'websocket'] // Prioritize polling to reduce WebSocket failures
 });
-console.log('Debug-2025-06-11-1: Socket.IO initialized');
+console.log('Debug-2025-06-12-1: Socket.IO initialized');
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
-console.log('Starting server... Debug-2025-06-11-1');
+console.log('Starting server... Debug-2025-06-12-1');
 
 if (!SPEED_WALLET_SECRET_KEY) {
   console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
   process.exit(1);
 }
 
-console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-11-1)`);
+console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-12-1)`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
@@ -306,6 +302,7 @@ async function createInvoice(amountSats, customerId, description) {
     );
     const invoiceId = createResponse.data.id;
     console.log('Created draft invoice:', invoiceId);
+    await logPaymentActivity(`Created draft invoice ${invoiceId} for ${amountSats} SATS`);
 
     await axios.post(
       `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}/finalize`,
@@ -319,6 +316,7 @@ async function createInvoice(amountSats, customerId, description) {
       }
     );
     console.log('Finalized invoice:', invoiceId);
+    await logPaymentActivity(`Finalized invoice ${invoiceId}`);
 
     const retrieveResponse = await axios.get(
       `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}`,
@@ -334,6 +332,7 @@ async function createInvoice(amountSats, customerId, description) {
     const invoiceData = retrieveResponse.data;
 
     console.log('Full invoice data:', JSON.stringify(invoiceData, null, 2));
+    await logPaymentActivity(`Retrieved invoice ${invoiceId}: ${JSON.stringify(invoiceData)}`);
 
     let lightningInvoice = invoiceData.payment_request || 
                           invoiceData.bolt11 || 
@@ -347,18 +346,21 @@ async function createInvoice(amountSats, customerId, description) {
       console.log('Detected LN-URL in payment_request:', lightningInvoice);
       lightningInvoice = await decodeAndFetchLnUrl(lightningInvoice);
       console.log('Fetched BOLT11 invoice from LN-URL:', lightningInvoice);
+      await logPaymentActivity(`Fetched BOLT11 invoice from LN-URL for ${invoiceId}: ${lightningInvoice}`);
     }
 
     if (!lightningInvoice) {
       console.warn('No Lightning invoice found in response. Available fields:', Object.keys(invoiceData));
       console.warn('Full invoice data for inspection:', invoiceData);
+      await logPaymentActivity(`No Lightning invoice found for ${invoiceId}. Available fields: ${Object.keys(invoiceData).join(', ')}`);
     } else {
       console.log('Found Lightning invoice:', lightningInvoice);
+      await logPaymentActivity(`Found Lightning invoice for ${invoiceId}: ${lightningInvoice}`);
     }
 
     return {
       hostedInvoiceUrl: invoiceData.hosted_invoice_url,
-      lightningInvoice: lightningInvoice || null,
+      lightningInvoice: lightningInvoice || invoiceData.hosted_invoice_url, // Fallback to hosted URL if lightningInvoice is missing
       invoiceId: invoiceData.id
     };
   } catch (error) {
@@ -370,6 +372,7 @@ async function createInvoice(amountSats, customerId, description) {
       status: errorStatus,
       details: errorDetails
     });
+    await logPaymentActivity(`Create Invoice Error: ${errorMessage} (Status: ${errorStatus}, Details: ${JSON.stringify(errorDetails)})`);
     throw new Error(`Failed to create invoice: ${errorMessage} (Status: ${errorStatus})`);
   }
 }
@@ -390,10 +393,12 @@ async function sendPayment(destination, amount, currency) {
       }
     );
     console.log('Send Payment Response:', response.data);
+    await logPaymentActivity(`Send Payment Response: ${JSON.stringify(response.data)}`);
     return response.data;
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
     console.error('Send Payment Error:', errorMessage, error.response?.status);
+    await logPaymentActivity(`Send Payment Error: ${errorMessage} (Status: ${error.response?.status})`);
     throw new Error(`Failed to send payment: ${errorMessage}`);
   }
 }
@@ -1080,6 +1085,7 @@ io.on('connection', (socket) => {
       }
       if (!lightningInvoice) {
         console.warn('No Lightning invoice available, falling back to hosted URL');
+        await logPaymentActivity(`No Lightning invoice for player ${socket.id}, using hosted URL: ${hostedInvoiceUrl}`);
       }
 
       console.log('Payment Request:', { lightningInvoice, hostedInvoiceUrl });
@@ -1090,14 +1096,14 @@ io.on('connection', (socket) => {
       });
 
       // Map the invoice to the socket for webhook handling
-      io.invoiceToSocket[invoiceData.invoiceId] = socket;
+      invoiceToSocket[invoiceData.invoiceId] = socket;
 
       // Set a timeout for payment (5 minutes)
       const paymentTimeout = setTimeout(() => {
         if (!players[socket.id]?.paid) {
           socket.emit('error', { message: 'Payment not verified within 5 minutes' });
           delete players[socket.id];
-          delete io.invoiceToSocket[invoiceData.invoiceId];
+          delete invoiceToSocket[invoiceData.invoiceId];
           console.log(`Payment timeout for player ${socket.id}, invoice ${invoiceData.invoiceId}`);
           logPaymentActivity(`Payment timeout for player ${socket.id}: ${invoiceData.invoiceId}`);
         }
