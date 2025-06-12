@@ -1,42 +1,42 @@
 // @ts-nocheck
 require('dotenv').config();
-console.log('Debug-2025-06-12-1: dotenv loaded');
+console.log('Debug-2025-06-12-2: dotenv loaded');
 
 const express = require('express');
-console.log('Debug-2025-06-12-1: express loaded');
+console.log('Debug-2025-06-12-2: express loaded');
 
 const socketio = require('socket.io');
-console.log('Debug-2025-06-12-1: socket.io loaded');
+console.log('Debug-2025-06-12-2: socket.io loaded');
 
 const http = require('http');
-console.log('Debug-2025-06-12-1: http loaded');
+console.log('Debug-2025-06-12-2: http loaded');
 
 const cors = require('cors');
-console.log('Debug-2025-06-12-1: cors loaded');
+console.log('Debug-2025-06-12-2: cors loaded');
 
 const axios = require('axios');
-console.log('Debug-2025-06-12-1: axios loaded');
+console.log('Debug-2025-06-12-2: axios loaded');
 
 const { bech32 } = require('bech32');
-console.log('Debug-2025-06-12-1: bech32 loaded');
+console.log('Debug-2025-06-12-2: bech32 loaded');
 
 const cron = require('node-cron');
-console.log('Debug-2025-06-12-1: node-cron loaded');
+console.log('Debug-2025-06-12-2: node-cron loaded');
 
 const fs = require('fs').promises;
-console.log('Debug-2025-06-12-1: fs loaded');
+console.log('Debug-2025-06-12-2: fs loaded');
 
 const path = require('path');
-console.log('Debug-2025-06-12-1: path loaded');
+console.log('Debug-2025-06-12-2: path loaded');
 
 const crypto = require('crypto');
-console.log('Debug-2025-06-12-1: crypto loaded');
+console.log('Debug-2025-06-12-2: crypto loaded');
 
 const rateLimit = require('express-rate-limit');
-console.log('Debug-2025-06-12-1: express-rate-limit loaded');
+console.log('Debug-2025-06-12-2: express-rate-limit loaded');
 
 const app = express();
-console.log('Debug-2025-06-12-1: express app created');
+console.log('Debug-2025-06-12-2: express app created');
 
 // Dynamic CORS setup to allow all vercel.app origins
 app.use(cors({
@@ -50,7 +50,7 @@ app.use(cors({
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
 }));
-console.log('Debug-2025-06-12-1: CORS middleware applied');
+console.log('Debug-2025-06-12-2: CORS middleware applied');
 
 // Parse JSON bodies for webhook
 app.use(express.json());
@@ -60,39 +60,51 @@ const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100 // Limit to 100 requests per window
 });
-console.log('Debug-2025-06-12-1: Rate limiter configured');
+console.log('Debug-2025-06-12-2: Rate limiter configured');
 
 // Add root route to fix "Cannot GET /" error
 app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
-console.log('Debug-2025-06-12-1: Root route added');
+console.log('Debug-2025-06-12-2: Root route added');
 
 // Add health check endpoint for UptimeRobot
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
-console.log('Debug-2025-06-12-1: Health route added');
+console.log('Debug-2025-06-12-2: Health route added');
 
 // Add endpoint to download logs
 const LOG_FILE = path.join(__dirname, 'payment_logs.txt');
+
+// Ensure log file exists on startup
+(async () => {
+  try {
+    await fs.access(LOG_FILE);
+  } catch (err) {
+    await fs.writeFile(LOG_FILE, '');
+    console.log('Created payment_logs.txt');
+  }
+})();
+
 app.get('/logs', async (req, res) => {
   try {
     const data = await fs.readFile(LOG_FILE);
     res.set('Content-Type', 'text/plain');
     res.send(data);
   } catch (err) {
+    console.error('Error reading log file:', err.message);
     res.status(500).send('Error reading log file');
   }
 });
-console.log('Debug-2025-06-12-1: Logs route added');
+console.log('Debug-2025-06-12-2: Logs route added');
 
 // Global map of invoice IDs to player sockets for payment verification
 const invoiceToSocket = {};
 
 app.post('/webhook', webhookLimiter, async (req, res) => {
   const signature = req.headers['x-webhook-signature'];
-  const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret'; // Set this in your Render environment variables
+  const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret';
   const computedSignature = crypto
     .createHmac('sha256', WEBHOOK_SECRET)
     .update(JSON.stringify(req.body))
@@ -170,38 +182,40 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
     res.status(500).send('Webhook processing failed');
   }
 });
-console.log('Debug-2025-06-12-1: Webhook route added');
+console.log('Debug-2025-06-12-2: Webhook route added');
 
 const server = http.createServer(app);
-console.log('Debug-2025-06-12-1: HTTP server created');
+console.log('Debug-2025-06-12-2: HTTP server created');
 
 const io = socketio(server, {
   cors: {
     origin: (origin, callback) => {
+      console.log('Socket.IO CORS origin:', origin);
       if (!origin || origin.includes('vercel.app') || origin.includes('localhost')) {
         callback(null, true);
       } else {
+        console.error('CORS error for origin:', origin);
         callback(new Error('Not allowed by CORS'));
       }
     },
     methods: ["GET", "POST"]
   },
-  transports: ['polling', 'websocket'] // Prioritize polling to reduce WebSocket failures
+  transports: ['polling'] // Force polling only, since WebSocket fails on Render
 });
-console.log('Debug-2025-06-12-1: Socket.IO initialized');
+console.log('Debug-2025-06-12-2: Socket.IO initialized');
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
-console.log('Starting server... Debug-2025-06-12-1');
+console.log('Starting server... Debug-2025-06-12-2');
 
 if (!SPEED_WALLET_SECRET_KEY) {
   console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
   process.exit(1);
 }
 
-console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-12-1)`);
+console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-12-2)`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
@@ -213,12 +227,12 @@ const PAYOUTS = {
   10000: { winner: 17000, platformFee: 3000 }
 };
 
-const BOT_JOIN_DELAYS = [10, 15, 20, 25]; // Bot joins after 10, 15, 20, or 25 seconds
+const BOT_JOIN_DELAYS = [10, 15, 20, 25];
 const GRID_COLS = 9;
 const GRID_ROWS = 7;
 const GRID_SIZE = GRID_COLS * GRID_ROWS;
 const PLACEMENT_TIME = 30;
-const MATCHMAKING_TIMEOUT = 25; // Matches "Estimated wait time: 10-25 seconds"
+const MATCHMAKING_TIMEOUT = 25;
 const SHIP_CONFIG = [
   { name: 'Aircraft Carrier', size: 5 },
   { name: 'Battleship', size: 4 },
@@ -230,7 +244,6 @@ const SHIP_CONFIG = [
 const games = {};
 const players = {};
 
-// Function to log payment activity
 const logPaymentActivity = async (message) => {
   const timestamp = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
   const logMessage = `[${timestamp}] ${message}\n`;
@@ -297,7 +310,7 @@ async function createInvoice(amountSats, customerId, description) {
           Authorization: `Basic ${AUTH_HEADER}`,
           'Content-Type': 'application/json'
         },
-        timeout: 10000 // 10-second timeout
+        timeout: 10000
       }
     );
     const invoiceId = createResponse.data.id;
@@ -360,7 +373,7 @@ async function createInvoice(amountSats, customerId, description) {
 
     return {
       hostedInvoiceUrl: invoiceData.hosted_invoice_url,
-      lightningInvoice: lightningInvoice || invoiceData.hosted_invoice_url, // Fallback to hosted URL if lightningInvoice is missing
+      lightningInvoice: lightningInvoice || invoiceData.hosted_invoice_url,
       invoiceId: invoiceData.id
     };
   } catch (error) {
@@ -430,7 +443,7 @@ class SeaBattleGame {
     this.matchmakingTimerInterval = null;
     this.shipHits = {};
     this.totalShipCells = SHIP_CONFIG.reduce((sum, ship) => sum + ship.size, 0);
-    this.botKnownPositions = {}; // Bot knows all player ship positions
+    this.botKnownPositions = {};
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -479,7 +492,7 @@ class SeaBattleGame {
   }
 
   startMatchmaking() {
-    const delay = BOT_JOIN_DELAYS[Math.floor(Math.random() * BOT_JOIN_DELAYS.length)] * 1000; // Random delay: 10, 15, 20, or 25 seconds
+    const delay = BOT_JOIN_DELAYS[Math.floor(Math.random() * BOT_JOIN_DELAYS.length)] * 1000;
     this.matchmakingTimerInterval = setTimeout(() => {
       if (Object.keys(this.players).length === 1) {
         const botId = `bot_${Date.now()}`;
@@ -782,7 +795,7 @@ class SeaBattleGame {
     });
 
     if (this.players[this.turn].isBot) {
-      const thinkingTime = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
+      const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
       setTimeout(() => this.botFireShot(this.turn), thinkingTime);
     }
   }
@@ -922,7 +935,7 @@ class SeaBattleGame {
     if (!hit) {
       this.turn = opponentId;
       if (this.players[this.turn].isBot) {
-        const thinkingTime = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
+        const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
         setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
     }
@@ -981,7 +994,7 @@ class SeaBattleGame {
     if (!hit) {
       this.turn = opponentId;
       if (this.players[this.turn].isBot) {
-        const thinkingTime = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
+        const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
         setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
     }
@@ -1057,6 +1070,9 @@ class SeaBattleGame {
 
 io.on('connection', (socket) => {
   console.log('New connection:', socket.id);
+  socket.on('error', (error) => {
+    console.error('Socket.IO connection error:', error);
+  });
   
   socket.on('joinGame', async ({ lightningAddress, betAmount }) => {
     try {
@@ -1066,7 +1082,6 @@ io.on('connection', (socket) => {
         throw new Error('Invalid bet amount');
       }
 
-      // Log deposit attempt
       await logPaymentActivity(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${lightningAddress}`);
 
       players[socket.id] = { lightningAddress, paid: false, betAmount };
@@ -1095,10 +1110,8 @@ io.on('connection', (socket) => {
         invoiceId: invoiceData.invoiceId
       });
 
-      // Map the invoice to the socket for webhook handling
       invoiceToSocket[invoiceData.invoiceId] = socket;
 
-      // Set a timeout for payment (5 minutes)
       const paymentTimeout = setTimeout(() => {
         if (!players[socket.id]?.paid) {
           socket.emit('error', { message: 'Payment not verified within 5 minutes' });
@@ -1109,7 +1122,6 @@ io.on('connection', (socket) => {
         }
       }, 5 * 60 * 1000);
 
-      // Clean up timeout if player cancels
       socket.on('cancelGame', () => {
         clearTimeout(paymentTimeout);
       });
@@ -1209,7 +1221,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Cron job to prevent Render idling (every 10 minutes, offset by 5 minutes)
 cron.schedule('5 */10 * * * *', async () => {
   try {
     await axios.get('https://thunderfleet-backend.onrender.com/health');
