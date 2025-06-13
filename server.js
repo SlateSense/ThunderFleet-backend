@@ -1095,9 +1095,10 @@ io.on('connection', (socket) => {
 
       const lightningInvoice = invoiceData.lightningInvoice;
       const hostedInvoiceUrl = invoiceData.hosted_invoice_url;
-      if (!hostedInvoiceUrl) {
-        throw new Error('No hosted invoice URL in invoice response');
-      }
+      // Removed the strict check for hostedInvoiceUrl to allow proceeding with lightningInvoice alone
+      // if (!hostedInvoiceUrl) {
+      //   throw new Error('No hosted invoice URL in invoice response');
+      // }
       if (!lightningInvoice) {
         console.warn('No Lightning invoice available, falling back to hosted URL');
         await logPaymentActivity(`No Lightning invoice for player ${socket.id}, using hosted URL: ${hostedInvoiceUrl}`);
