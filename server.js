@@ -1,36 +1,40 @@
 // @ts-nocheck
 require('dotenv').config();
-console.log('Debug-2025-06-12-2: dotenv loaded');
+console.log('Debug-2025-06-15-1: dotenv loaded');
 
 const express = require('express');
-console.log('Debug-2025-06-12-2: express loaded');
+console.log('Debug-2025-06-15-1: express loaded');
 
 const socketio = require('socket.io');
-console.log('Debug-2025-06-12-2: socket.io loaded');
+console.log('Debug-2025-06-15-1: socket.io loaded');
 
 const http = require('http');
-console.log('Debug-2025-06-12-2: http loaded');
+console.log('Debug-2025-06-15-1: http loaded');
 
 const cors = require('cors');
-console.log('Debug-2025-06-12-2: cors loaded');
+console.log('Debug-2025-06-15-1: cors loaded');
 
 const axios = require('axios');
-console.log('Debug-2025-06-12-2: axios loaded');
+console.log('Debug-2025-06-15-1: axios loaded');
 
 const { bech32 } = require('bech32');
-console.log('Debug-2025-06-12-2: bech32 loaded');
+console.log('Debug-2025-06-15-1: bech32 loaded');
 
 const cron = require('node-cron');
-console.log('Debug-2025-06-12-2: node-cron loaded');
+console.log('Debug-2025-06-15-1: node-cron loaded');
 
 const crypto = require('crypto');
-console.log('Debug-2025-06-12-2: crypto loaded');
+console.log('Debug-2025-06-15-1: crypto loaded');
 
 const rateLimit = require('express-rate-limit');
-console.log('Debug-2025-06-12-2: express-rate-limit loaded');
+console.log('Debug-2025-06-15-1: express-rate-limit loaded');
 
 const app = express();
-console.log('Debug-2025-06-12-2: express app created');
+console.log('Debug-2025-06-15-1: express app created');
+
+// Enable trust proxy to handle X-Forwarded-For headers correctly
+app.set('trust proxy', true);
+console.log('Debug-2025-06-15-1: Trust proxy enabled');
 
 // Dynamic CORS setup to allow all origins for development
 app.use(cors({
@@ -38,7 +42,7 @@ app.use(cors({
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
 }));
-console.log('Debug-2025-06-12-2: CORS middleware applied');
+console.log('Debug-2025-06-15-1: CORS middleware applied');
 
 // Parse JSON bodies for webhook
 app.use(express.json());
@@ -48,19 +52,19 @@ const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100 // Limit to 100 requests per window
 });
-console.log('Debug-2025-06-12-2: Rate limiter configured');
+console.log('Debug-2025-06-15-1: Rate limiter configured');
 
 // Add root route to fix "Cannot GET /" error
 app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
-console.log('Debug-2025-06-12-2: Root route added');
+console.log('Debug-2025-06-15-1: Root route added');
 
 // Add health check endpoint for UptimeRobot
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
-console.log('Debug-2025-06-12-2: Health route added');
+console.log('Debug-2025-06-15-1: Health route added');
 
 // Global map of invoice IDs to player sockets for payment verification
 const invoiceToSocket = {};
@@ -76,10 +80,15 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
   console.log('Received webhook:', event);
 
   try {
-    switch (event.type) {
-      case 'invoice_paid':
-      case 'payment_succeeded':
-        const invoiceId = event.invoiceId || event.data?.invoiceId;
+    // Fix: Use event_type instead of event.type
+    const eventType = event.event_type;
+    console.log('Processing event type:', eventType);
+
+    switch (eventType) {
+      case 'invoice.paid':
+      case 'payment.paid':
+      case 'payment.confirmed':
+        const invoiceId = event.data?.object?.id;
         if (!invoiceId) {
           throw new Error('No invoiceId in webhook payload');
         }
@@ -110,8 +119,8 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         delete invoiceToSocket[invoiceId];
         break;
 
-      case 'payment_failed':
-        const failedInvoiceId = event.invoiceId || event.data?.invoiceId;
+      case 'payment.failed':
+        const failedInvoiceId = event.data?.object?.id;
         if (!failedInvoiceId) {
           throw new Error('No invoiceId in webhook payload');
         }
@@ -126,7 +135,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         break;
 
       default:
-        console.log(`Unhandled event type: ${event.type}`);
+        console.log(`Unhandled event type: ${eventType}`);
     }
 
     res.status(200).send('Webhook received');
@@ -135,10 +144,10 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
     res.status(500).send('Webhook processing failed');
   }
 });
-console.log('Debug-2025-06-12-2: Webhook route added');
+console.log('Debug-2025-06-15-1: Webhook route added');
 
 const server = http.createServer(app);
-console.log('Debug-2025-06-12-2: HTTP server created');
+console.log('Debug-2025-06-15-1: HTTP server created');
 
 const io = socketio(server, {
   cors: {
@@ -147,14 +156,14 @@ const io = socketio(server, {
   },
   transports: ['polling'] // Force polling only, since WebSocket fails on Render
 });
-console.log('Debug-2025-06-12-2: Socket.IO initialized');
+console.log('Debug-2025-06-15-1: Socket.IO initialized');
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
-console.log('Starting server... Debug-2025-06-12-2');
+console.log('Starting server... Debug-2025-06-15-1');
 
 if (!SPEED_WALLET_SECRET_KEY) {
   console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
@@ -166,7 +175,7 @@ if (!SPEED_WALLET_WEBHOOK_SECRET) {
   process.exit(1);
 }
 
-console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-12-2)`);
+console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-15-1)`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
@@ -298,15 +307,17 @@ async function createInvoice(amountSats, customerId, description) {
     }
 
     if (!lightningInvoice) {
-      console.warn('No Lightning invoice found in response. Available fields:', Object.keys(invoiceData));
+      console.warn('No Lightning invoice found in response. Falling back to hosted_invoice_url.');
+      console.warn('Available fields:', Object.keys(invoiceData));
       console.warn('Full invoice data for inspection:', invoiceData);
+      lightningInvoice = invoiceData.hosted_invoice_url;
     } else {
       console.log('Found Lightning invoice:', lightningInvoice);
     }
 
     return {
       hostedInvoiceUrl: invoiceData.hosted_invoice_url,
-      lightningInvoice: lightningInvoice || invoiceData.hosted_invoice_url,
+      lightningInvoice: lightningInvoice,
       invoiceId: invoiceData.id
     };
   } catch (error) {
@@ -1066,12 +1077,12 @@ io.on('connection', (socket) => {
       );
 
       const lightningInvoice = invoiceData.lightningInvoice;
-      const hostedInvoiceUrl = invoiceData.hosted_invoice_url;
+      const hostedInvoiceUrl = invoiceData.hostedInvoiceUrl;
 
       console.log('Payment Request:', { lightningInvoice, hostedInvoiceUrl });
       socket.emit('paymentRequest', {
-        lightningInvoice: lightningInvoice || hostedInvoiceUrl,
-        hostedInvoiceUrl,
+        lightningInvoice: lightningInvoice,
+        hostedInvoiceUrl: hostedInvoiceUrl,
         invoiceId: invoiceData.invoiceId
       });
 
