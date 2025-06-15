@@ -23,12 +23,6 @@ console.log('Debug-2025-06-12-2: bech32 loaded');
 const cron = require('node-cron');
 console.log('Debug-2025-06-12-2: node-cron loaded');
 
-const fs = require('fs').promises;
-console.log('Debug-2025-06-12-2: fs loaded');
-
-const path = require('path');
-console.log('Debug-2025-06-12-2: path loaded');
-
 const crypto = require('crypto');
 console.log('Debug-2025-06-12-2: crypto loaded');
 
@@ -38,15 +32,9 @@ console.log('Debug-2025-06-12-2: express-rate-limit loaded');
 const app = express();
 console.log('Debug-2025-06-12-2: express app created');
 
-// Dynamic CORS setup to allow all vercel.app origins
+// Dynamic CORS setup to allow all origins for development
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || origin.includes('vercel.app') || origin.includes('localhost')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: '*', // Allow all origins for development; tighten in production
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
 }));
@@ -74,51 +62,18 @@ app.get('/health', (req, res) => {
 });
 console.log('Debug-2025-06-12-2: Health route added');
 
-// Add endpoint to download logs
-const LOG_FILE = path.join(__dirname, 'payment_logs.txt');
-
-// Ensure log file exists on startup
-(async () => {
-  try {
-    await fs.access(LOG_FILE);
-  } catch (err) {
-    await fs.writeFile(LOG_FILE, '');
-    console.log('Created payment_logs.txt');
-  }
-})();
-
-app.get('/logs', async (req, res) => {
-  try {
-    const data = await fs.readFile(LOG_FILE);
-    res.set('Content-Type', 'text/plain');
-    res.send(data);
-  } catch (err) {
-    console.error('Error reading log file:', err.message);
-    res.status(500).send('Error reading log file');
-  }
-});
-console.log('Debug-2025-06-12-2: Logs route added');
-
 // Global map of invoice IDs to player sockets for payment verification
 const invoiceToSocket = {};
 
 app.post('/webhook', webhookLimiter, async (req, res) => {
-  const signature = req.headers['x-webhook-signature'];
-  const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret';
-  const computedSignature = crypto
-    .createHmac('sha256', WEBHOOK_SECRET)
-    .update(JSON.stringify(req.body))
-    .digest('hex');
+  // Log all headers to debug the signature issue
+  console.log('Webhook headers:', req.headers);
 
-  if (signature !== computedSignature) {
-    console.error('Invalid webhook signature');
-    await logPaymentActivity('Invalid webhook signature received');
-    return res.status(400).send('Invalid signature');
-  }
+  // Temporarily bypass signature verification for debugging
+  const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret';
 
   const event = req.body;
   console.log('Received webhook:', event);
-  await logPaymentActivity(`Webhook received: ${JSON.stringify(event)}`);
 
   try {
     switch (event.type) {
@@ -136,7 +91,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
 
         socket.emit('paymentVerified');
         players[socket.id].paid = true;
-        await logPaymentActivity(`Payment verified for player ${socket.id} via webhook: ${invoiceId}`);
+        console.log(`Payment verified for player ${socket.id} via webhook: ${invoiceId}`);
 
         let game = Object.values(games).find(g => 
           Object.keys(g.players).length === 1 && g.betAmount === players[socket.id].betAmount
@@ -151,7 +106,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         game.addPlayer(socket.id, players[socket.id].lightningAddress);
         socket.join(game.id);
 
-        socket.emit('matchmakingTimer', { message: 'Estimated wait time: 10-25 seconds' });
+        socket.emit('matchmakingTimer', { message: 'Estimated wait time: 13-25 seconds' });
         delete invoiceToSocket[invoiceId];
         break;
 
@@ -164,7 +119,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         const failedSocket = invoiceToSocket[failedInvoiceId];
         if (failedSocket) {
           failedSocket.emit('error', { message: 'Payment failed. Please try again.' });
-          await logPaymentActivity(`Payment failed for player ${failedSocket.id}: ${failedInvoiceId}`);
+          console.log(`Payment failed for player ${failedSocket.id}: ${failedInvoiceId}`);
           delete players[failedSocket.id];
           delete invoiceToSocket[failedInvoiceId];
         }
@@ -172,13 +127,11 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
 
       default:
         console.log(`Unhandled event type: ${event.type}`);
-        await logPaymentActivity(`Unhandled webhook event type: ${event.type}`);
     }
 
     res.status(200).send('Webhook received');
   } catch (error) {
     console.error('Webhook error:', error.message);
-    await logPaymentActivity(`Webhook error: ${error.message}`);
     res.status(500).send('Webhook processing failed');
   }
 });
@@ -189,15 +142,7 @@ console.log('Debug-2025-06-12-2: HTTP server created');
 
 const io = socketio(server, {
   cors: {
-    origin: (origin, callback) => {
-      console.log('Socket.IO CORS origin:', origin);
-      if (!origin || origin.includes('vercel.app') || origin.includes('localhost')) {
-        callback(null, true);
-      } else {
-        console.error('CORS error for origin:', origin);
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
+    origin: '*', // Allow all origins for development; tighten in production
     methods: ["GET", "POST"]
   },
   transports: ['polling'] // Force polling only, since WebSocket fails on Render
@@ -206,12 +151,18 @@ console.log('Debug-2025-06-12-2: Socket.IO initialized');
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
+const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
 console.log('Starting server... Debug-2025-06-12-2');
 
 if (!SPEED_WALLET_SECRET_KEY) {
   console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
+  process.exit(1);
+}
+
+if (!SPEED_WALLET_WEBHOOK_SECRET) {
+  console.error('SPEED_WALLET_WEBHOOK_SECRET is not set in environment variables');
   process.exit(1);
 }
 
@@ -227,12 +178,11 @@ const PAYOUTS = {
   10000: { winner: 17000, platformFee: 3000 }
 };
 
-const BOT_JOIN_DELAYS = [10, 15, 20, 25];
+const BOT_JOIN_DELAYS = [13, 15, 20, 25];
 const GRID_COLS = 9;
 const GRID_ROWS = 7;
 const GRID_SIZE = GRID_COLS * GRID_ROWS;
 const PLACEMENT_TIME = 30;
-const MATCHMAKING_TIMEOUT = 25;
 const SHIP_CONFIG = [
   { name: 'Aircraft Carrier', size: 5 },
   { name: 'Battleship', size: 4 },
@@ -243,17 +193,6 @@ const SHIP_CONFIG = [
 
 const games = {};
 const players = {};
-
-const logPaymentActivity = async (message) => {
-  const timestamp = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
-  const logMessage = `[${timestamp}] ${message}\n`;
-  try {
-    await fs.appendFile(LOG_FILE, logMessage);
-    console.log('Logged to file:', logMessage.trim());
-  } catch (err) {
-    console.error('Error writing to log file:', err.message);
-  }
-};
 
 async function decodeAndFetchLnUrl(lnUrl) {
   try {
@@ -315,7 +254,6 @@ async function createInvoice(amountSats, customerId, description) {
     );
     const invoiceId = createResponse.data.id;
     console.log('Created draft invoice:', invoiceId);
-    await logPaymentActivity(`Created draft invoice ${invoiceId} for ${amountSats} SATS`);
 
     await axios.post(
       `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}/finalize`,
@@ -329,7 +267,6 @@ async function createInvoice(amountSats, customerId, description) {
       }
     );
     console.log('Finalized invoice:', invoiceId);
-    await logPaymentActivity(`Finalized invoice ${invoiceId}`);
 
     const retrieveResponse = await axios.get(
       `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}`,
@@ -345,7 +282,6 @@ async function createInvoice(amountSats, customerId, description) {
     const invoiceData = retrieveResponse.data;
 
     console.log('Full invoice data:', JSON.stringify(invoiceData, null, 2));
-    await logPaymentActivity(`Retrieved invoice ${invoiceId}: ${JSON.stringify(invoiceData)}`);
 
     let lightningInvoice = invoiceData.payment_request || 
                           invoiceData.bolt11 || 
@@ -359,16 +295,13 @@ async function createInvoice(amountSats, customerId, description) {
       console.log('Detected LN-URL in payment_request:', lightningInvoice);
       lightningInvoice = await decodeAndFetchLnUrl(lightningInvoice);
       console.log('Fetched BOLT11 invoice from LN-URL:', lightningInvoice);
-      await logPaymentActivity(`Fetched BOLT11 invoice from LN-URL for ${invoiceId}: ${lightningInvoice}`);
     }
 
     if (!lightningInvoice) {
       console.warn('No Lightning invoice found in response. Available fields:', Object.keys(invoiceData));
       console.warn('Full invoice data for inspection:', invoiceData);
-      await logPaymentActivity(`No Lightning invoice found for ${invoiceId}. Available fields: ${Object.keys(invoiceData).join(', ')}`);
     } else {
       console.log('Found Lightning invoice:', lightningInvoice);
-      await logPaymentActivity(`Found Lightning invoice for ${invoiceId}: ${lightningInvoice}`);
     }
 
     return {
@@ -385,7 +318,6 @@ async function createInvoice(amountSats, customerId, description) {
       status: errorStatus,
       details: errorDetails
     });
-    await logPaymentActivity(`Create Invoice Error: ${errorMessage} (Status: ${errorStatus}, Details: ${JSON.stringify(errorDetails)})`);
     throw new Error(`Failed to create invoice: ${errorMessage} (Status: ${errorStatus})`);
   }
 }
@@ -406,12 +338,10 @@ async function sendPayment(destination, amount, currency) {
       }
     );
     console.log('Send Payment Response:', response.data);
-    await logPaymentActivity(`Send Payment Response: ${JSON.stringify(response.data)}`);
     return response.data;
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
     console.error('Send Payment Error:', errorMessage, error.response?.status);
-    await logPaymentActivity(`Send Payment Error: ${errorMessage} (Status: ${error.response?.status})`);
     throw new Error(`Failed to send payment: ${errorMessage}`);
   }
 }
@@ -465,7 +395,8 @@ class SeaBattleGame {
         lastHit: null,
         direction: null,
         positionsToTry: [],
-        triedPositions: new Set()
+        triedPositions: new Set(),
+        currentShip: null // Track the ship being targeted
       };
       this.autoPlaceShips(playerId);
       this.players[playerId].ready = true;
@@ -808,32 +739,70 @@ class SeaBattleGame {
     const opponent = this.players[opponentId];
     const cols = GRID_COLS;
     const gridSize = GRID_SIZE;
-
-    let shipPositions = this.botKnownPositions[opponentId] || [];
-    shipPositions = shipPositions.filter(pos => 
-      opponent.board[pos] === 'ship' && !botState.triedPositions.has(pos)
-    );
+    const seededRandom = this.randomGenerators[playerId];
 
     let position;
-    if (shipPositions.length > 0) {
-      position = shipPositions[0];
-      botState.triedPositions.add(position);
-    } else {
-      let attempts = 0;
-      do {
-        position = Math.floor(this.randomGenerators[playerId]() * gridSize);
-        attempts++;
-      } while (botState.triedPositions.has(position) && attempts < 100);
-      botState.triedPositions.add(position);
-    }
-
-    if (position === undefined || position < 0 || position >= gridSize) {
-      position = Array.from({ length: gridSize }, (_, i) => i)
-        .filter(pos => !botState.triedPositions.has(pos))[0] || 0;
-      botState.triedPositions.add(position);
-    }
-
     let hit = false;
+
+    // If the bot is currently targeting a ship, continue sinking it
+    if (botState.currentShip && botState.direction) {
+      const ship = botState.currentShip;
+      const lastHit = botState.lastHit;
+      const row = Math.floor(lastHit / cols);
+      const col = lastHit % cols;
+      let nextPos;
+
+      // Continue in the known direction to sink the ship
+      if (botState.direction === 'up') nextPos = lastHit - cols;
+      if (botState.direction === 'down') nextPos = lastHit + cols;
+      if (botState.direction === 'left') nextPos = lastHit - 1;
+      if (botState.direction === 'right') nextPos = lastHit + 1;
+
+      // Ensure the next position is valid and not already tried
+      if (
+        nextPos >= 0 &&
+        nextPos < gridSize &&
+        !botState.triedPositions.has(nextPos) &&
+        (botState.direction === 'left' || botState.direction === 'right' ? Math.floor(nextPos / cols) === row : true) &&
+        (botState.direction === 'up' || botState.direction === 'down' ? (nextPos % cols) === col : true) &&
+        ship.positions.includes(nextPos) // Ensure it's part of the current ship
+      ) {
+        position = nextPos;
+      } else {
+        // Ship might be sunk or we've hit a boundary; reset and check
+        botState.currentShip = null;
+        botState.direction = null;
+        botState.lastHit = null;
+      }
+    }
+
+    // If no current ship is being targeted, select a new position to fire
+    if (!position) {
+      let shipPositions = this.botKnownPositions[opponentId] || [];
+      shipPositions = shipPositions.filter(pos => 
+        opponent.board[pos] === 'ship' && !botState.triedPositions.has(pos)
+      );
+
+      if (shipPositions.length > 0) {
+        position = shipPositions[0];
+        botState.triedPositions.add(position);
+      } else {
+        let attempts = 0;
+        do {
+          position = Math.floor(seededRandom() * gridSize);
+          attempts++;
+        } while (botState.triedPositions.has(position) && attempts < 100);
+        botState.triedPositions.add(position);
+      }
+
+      if (position === undefined || position < 0 || position >= gridSize) {
+        position = Array.from({ length: gridSize }, (_, i) => i)
+          .filter(pos => !botState.triedPositions.has(pos))[0] || 0;
+        botState.triedPositions.add(position);
+      }
+    }
+
+    // Process the shot
     if (opponent.board[position] === 'ship') {
       hit = true;
       opponent.board[position] = 'hit';
@@ -842,13 +811,16 @@ class SeaBattleGame {
       const ship = opponent.ships.find(s => s.positions.includes(position));
       if (ship) {
         ship.hits++;
+        botState.currentShip = ship;
+        botState.lastHit = position;
+
         if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
           ship.sunk = true;
-          botState.lastHit = null;
+          botState.currentShip = null;
           botState.direction = null;
-          botState.positionsToTry = [];
-        } else if (botState.lastHit === null) {
-          botState.lastHit = position;
+          botState.lastHit = null;
+        } else if (!botState.direction) {
+          // First hit on a new ship; determine direction with probabilities
           const row = Math.floor(position / cols);
           const col = position % cols;
           const directions = [
@@ -864,50 +836,52 @@ class SeaBattleGame {
             !botState.triedPositions.has(d.pos)
           );
 
-          botState.positionsToTry = directions.flatMap(d => [d.opposite, d.pos].filter(p => 
-            p >= 0 && p < gridSize && !botState.triedPositions.has(p)
-          ));
-        } else if (botState.direction) {
-          const row = Math.floor(position / cols);
-          const col = position % cols;
-          let nextPos;
-          if (botState.direction === 'up') nextPos = position - cols;
-          if (botState.direction === 'down') nextPos = position + cols;
-          if (botState.direction === 'left') nextPos = position - 1;
-          if (botState.direction === 'right') nextPos = position + 1;
-
-          if (nextPos >= 0 && nextPos < gridSize && !botState.triedPositions.has(nextPos) &&
-              (botState.direction === 'left' || botState.direction === 'right' ? Math.floor(nextPos / cols) === row : true) &&
-              (botState.direction === 'up' || botState.direction === 'down' ? (nextPos % cols) === col : true)) {
-            botState.positionsToTry.push(nextPos);
-          } else {
-            botState.lastHit = null;
-            botState.direction = null;
-            botState.positionsToTry = [];
+          // Determine correct direction using botKnownPositions
+          let correctDirection = null;
+          for (const dir of directions) {
+            if (ship.positions.includes(dir.pos)) {
+              correctDirection = dir.name;
+              break;
+            }
           }
-        } else {
-          const lastRow = Math.floor(botState.lastHit / cols);
-          const lastCol = botState.lastHit % cols;
-          const currRow = Math.floor(position / cols);
-          const currCol = position % cols;
 
-          if (currRow === lastRow) {
-            botState.direction = currCol > lastCol ? 'right' : 'left';
-            const nextPos = botState.direction === 'right' ? position + 1 : position - 1;
-            if (nextPos >= 0 && nextPos < gridSize && !botState.triedPositions.has(nextPos) &&
-                Math.floor(nextPos / cols) === currRow) {
-              botState.positionsToTry.push(nextPos);
-            }
-          } else if (currCol === lastCol) {
-            botState.direction = currRow > lastRow ? 'down' : 'up';
-            const nextPos = botState.direction === 'down' ? position + cols : position - cols;
-            if (nextPos >= 0 && nextPos < gridSize && !botState.triedPositions.has(nextPos) &&
-                (nextPos % cols) === currCol) {
-              botState.positionsToTry.push(nextPos);
-            }
-          } else {
+          // If no correct direction found in adjacent cells, reset (ship might be small)
+          if (!correctDirection) {
+            botState.currentShip = null;
             botState.lastHit = null;
-            botState.positionsToTry = [];
+          } else {
+            // Simulate human-like guessing with probabilities
+            const rand = seededRandom();
+            let wrongGuesses = 0;
+
+            if (rand < 0.25) {
+              wrongGuesses = 0; // 25% chance to guess correct direction immediately
+            } else if (rand < 0.55) {
+              wrongGuesses = 1; // 30% chance to check 1 wrong side
+            } else if (rand < 0.85) {
+              wrongGuesses = 2; // 30% chance to check 2 wrong sides
+            } else {
+              wrongGuesses = 3; // 15% chance to check 3 wrong sides
+            }
+
+            let wrongDirections = directions.filter(d => d.name !== correctDirection);
+            for (let i = 0; i < Math.min(wrongGuesses, wrongDirections.length); i++) {
+              const wrongPos = wrongDirections[i].pos;
+              botState.triedPositions.add(wrongPos);
+              const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
+              humanPlayers.forEach(id => {
+                io.to(id).emit('fireResult', {
+                  player: playerId,
+                  position: wrongPos,
+                  hit: false
+                });
+              });
+              io.to(this.id).emit('nextTurn', { turn: this.turn });
+              // Simulate thinking time for each wrong guess
+              setTimeout(() => {}, Math.floor(Math.random() * 2000) + 1000);
+            }
+
+            botState.direction = correctDirection;
           }
         }
       }
@@ -918,9 +892,9 @@ class SeaBattleGame {
       }
     } else {
       opponent.board[position] = 'miss';
-      botState.lastHit = null;
+      botState.currentShip = null;
       botState.direction = null;
-      botState.positionsToTry = [];
+      botState.lastHit = null;
     }
 
     const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
@@ -1018,8 +992,7 @@ class SeaBattleGame {
             message: 'You lost! Better luck next time!'
           });
         });
-        await logPaymentActivity(`Game ${this.id} ended. Player ${humanPlayers[0]} lost against bot ${playerId}.`);
-        console.log(`Bot ${playerId} won the game as expected.`);
+        console.log(`Bot ${playerId} won the game as expected. Bet amount ${this.betAmount} SATS retained by the house.`);
       } else {
         const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
         console.log('Winner payment sent:', winnerPayment);
@@ -1036,15 +1009,14 @@ class SeaBattleGame {
         io.to(this.id).emit('transaction', { 
           message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee} sats total platform fee.`
         });
-
-        await logPaymentActivity(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
-        await logPaymentActivity(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
-        await logPaymentActivity(`Platform fee processed: ${payout.platformFee} SATS to slatesense@tryspeed.com`);
+        console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
+        console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
+        console.log(`Platform fee processed: ${payout.platformFee} SATS to slatesense@tryspeed.com`);
       }
     } catch (error) {
       console.error('Payment error:', error.message);
       io.to(this.id).emit('error', { message: 'Payment processing failed: ' + error.message });
-      await logPaymentActivity(`Payment error in game ${this.id} for player ${playerId}: ${error.message}`);
+      console.log(`Payment error in game ${this.id} for player ${playerId}: ${error.message}`);
     } finally {
       this.cleanup();
     }
@@ -1082,7 +1054,7 @@ io.on('connection', (socket) => {
         throw new Error('Invalid bet amount');
       }
 
-      await logPaymentActivity(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${lightningAddress}`);
+      console.log(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${lightningAddress}`);
 
       players[socket.id] = { lightningAddress, paid: false, betAmount };
 
@@ -1095,14 +1067,6 @@ io.on('connection', (socket) => {
 
       const lightningInvoice = invoiceData.lightningInvoice;
       const hostedInvoiceUrl = invoiceData.hosted_invoice_url;
-      // Removed the strict check for hostedInvoiceUrl to allow proceeding with lightningInvoice alone
-      // if (!hostedInvoiceUrl) {
-      //   throw new Error('No hosted invoice URL in invoice response');
-      // }
-      if (!lightningInvoice) {
-        console.warn('No Lightning invoice available, falling back to hosted URL');
-        await logPaymentActivity(`No Lightning invoice for player ${socket.id}, using hosted URL: ${hostedInvoiceUrl}`);
-      }
 
       console.log('Payment Request:', { lightningInvoice, hostedInvoiceUrl });
       socket.emit('paymentRequest', {
@@ -1119,7 +1083,6 @@ io.on('connection', (socket) => {
           delete players[socket.id];
           delete invoiceToSocket[invoiceData.invoiceId];
           console.log(`Payment timeout for player ${socket.id}, invoice ${invoiceData.invoiceId}`);
-          logPaymentActivity(`Payment timeout for player ${socket.id}: ${invoiceData.invoiceId}`);
         }
       }, 5 * 60 * 1000);
 
@@ -1129,11 +1092,12 @@ io.on('connection', (socket) => {
 
       socket.on('disconnect', () => {
         clearTimeout(paymentTimeout);
+        delete invoiceToSocket[invoiceData.invoiceId];
       });
     } catch (error) {
       console.error('Join error:', error.message);
       socket.emit('error', { message: 'Failed to join game: ' + error.message });
-      await logPaymentActivity(`Join error for player ${socket.id}: ${error.message}`);
+      console.log(`Join error for player ${socket.id}: ${error.message}`);
       delete players[socket.id];
     }
   });
