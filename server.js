@@ -1,40 +1,40 @@
 // @ts-nocheck
 require('dotenv').config();
-console.log('Debug-2025-06-15-2: dotenv loaded');
+console.log('Debug-2025-06-15-3: dotenv loaded');
 
 const express = require('express');
-console.log('Debug-2025-06-15-2: express loaded');
+console.log('Debug-2025-06-15-3: express loaded');
 
 const socketio = require('socket.io');
-console.log('Debug-2025-06-15-2: socket.io loaded');
+console.log('Debug-2025-06-15-3: socket.io loaded');
 
 const http = require('http');
-console.log('Debug-2025-06-15-2: http loaded');
+console.log('Debug-2025-06-15-3: http loaded');
 
 const cors = require('cors');
-console.log('Debug-2025-06-15-2: cors loaded');
+console.log('Debug-2025-06-15-3: cors loaded');
 
 const axios = require('axios');
-console.log('Debug-2025-06-15-2: axios loaded');
+console.log('Debug-2025-06-15-3: axios loaded');
 
 const { bech32 } = require('bech32');
-console.log('Debug-2025-06-15-2: bech32 loaded');
+console.log('Debug-2025-06-15-3: bech32 loaded');
 
 const cron = require('node-cron');
-console.log('Debug-2025-06-15-2: node-cron loaded');
+console.log('Debug-2025-06-15-3: node-cron loaded');
 
 const crypto = require('crypto');
-console.log('Debug-2025-06-15-2: crypto loaded');
+console.log('Debug-2025-06-15-3: crypto loaded');
 
 const rateLimit = require('express-rate-limit');
-console.log('Debug-2025-06-15-2: express-rate-limit loaded');
+console.log('Debug-2025-06-15-3: express-rate-limit loaded');
 
 const app = express();
-console.log('Debug-2025-06-15-2: express app created');
+console.log('Debug-2025-06-15-3: express app created');
 
 // Enable trust proxy to handle X-Forwarded-For headers correctly
 app.set('trust proxy', true);
-console.log('Debug-2025-06-15-2: Trust proxy enabled');
+console.log('Debug-2025-06-15-3: Trust proxy enabled');
 
 // Dynamic CORS setup to allow all origins for development
 app.use(cors({
@@ -42,7 +42,7 @@ app.use(cors({
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
 }));
-console.log('Debug-2025-06-15-2: CORS middleware applied');
+console.log('Debug-2025-06-15-3: CORS middleware applied');
 
 // Parse JSON bodies for webhook
 app.use(express.json());
@@ -52,19 +52,19 @@ const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100 // Limit to 100 requests per window
 });
-console.log('Debug-2025-06-15-2: Rate limiter configured');
+console.log('Debug-2025-06-15-3: Rate limiter configured');
 
 // Add root route to fix "Cannot GET /" error
 app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
-console.log('Debug-2025-06-15-2: Root route added');
+console.log('Debug-2025-06-15-3: Root route added');
 
 // Add health check endpoint for UptimeRobot
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
-console.log('Debug-2025-06-15-2: Health route added');
+console.log('Debug-2025-06-15-3: Health route added');
 
 // Global map of invoice IDs to player sockets for payment verification
 const invoiceToSocket = {};
@@ -110,7 +110,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         game.addPlayer(socket.id, players[socket.id].lightningAddress);
         socket.join(game.id);
 
-        socket.emit('matchmakingTimer', { message: 'Estimated wait time: 13-25 seconds' });
+        socket.emit('matchmakingTimer', { message: 'Estimated wait time: 10-25 seconds' });
         delete invoiceToSocket[invoiceId];
         break;
 
@@ -139,10 +139,10 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
     res.status(500).send('Webhook processing failed');
   }
 });
-console.log('Debug-2025-06-15-2: Webhook route added');
+console.log('Debug-2025-06-15-3: Webhook route added');
 
 const server = http.createServer(app);
-console.log('Debug-2025-06-15-2: HTTP server created');
+console.log('Debug-2025-06-15-3: HTTP server created');
 
 const io = socketio(server, {
   cors: {
@@ -151,14 +151,14 @@ const io = socketio(server, {
   },
   transports: ['polling'] // Force polling only, since WebSocket fails on Render
 });
-console.log('Debug-2025-06-15-2: Socket.IO initialized');
+console.log('Debug-2025-06-15-3: Socket.IO initialized');
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
-console.log('Starting server... Debug-2025-06-15-2');
+console.log('Starting server... Debug-2025-06-15-3');
 
 if (!SPEED_WALLET_SECRET_KEY) {
   console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
@@ -170,7 +170,7 @@ if (!SPEED_WALLET_WEBHOOK_SECRET) {
   process.exit(1);
 }
 
-console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-15-2)`);
+console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-15-3)`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
@@ -182,11 +182,11 @@ const PAYOUTS = {
   10000: { winner: 17000, platformFee: 3000 }
 };
 
-const BOT_JOIN_DELAYS = [13, 15, 20, 25];
+const BOT_JOIN_DELAYS = [10, 15, 20, 25];
 const GRID_COLS = 9;
 const GRID_ROWS = 7;
 const GRID_SIZE = GRID_COLS * GRID_ROWS;
-const PLACEMENT_TIME = 30;
+const PLACEMENT_TIME = 45; // Adjusted to match frontend
 const SHIP_CONFIG = [
   { name: 'Aircraft Carrier', size: 5 },
   { name: 'Battleship', size: 4 },
@@ -380,6 +380,7 @@ class SeaBattleGame {
     this.shipHits = {};
     this.totalShipCells = SHIP_CONFIG.reduce((sum, ship) => sum + ship.size, 0);
     this.botKnownPositions = {};
+    this.botShots = {}; // Track shots fired by the bot
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -399,12 +400,11 @@ class SeaBattleGame {
     if (isBot) {
       this.botState[playerId] = {
         lastHit: null,
-        direction: null,
-        positionsToTry: [],
+        adjacentQueue: [],
         triedPositions: new Set(),
-        currentShip: null,
-        directionsTried: new Set() // Track which directions have been tried for the current ship
+        hitMode: false
       };
+      this.botShots[playerId] = new Set();
       this.autoPlaceShips(playerId);
       this.players[playerId].ready = true;
       console.log(`Bot ${playerId} joined and placed ships automatically.`);
@@ -430,7 +430,6 @@ class SeaBattleGame {
   }
 
   startMatchmaking() {
-    // Emit waitingForOpponent to all human players in the game
     const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
     humanPlayers.forEach(playerId => {
       io.to(playerId).emit('waitingForOpponent', { message: 'Waiting for opponent...' });
@@ -451,7 +450,6 @@ class SeaBattleGame {
     const playerIds = Object.keys(this.players);
     
     playerIds.forEach(playerId => {
-      // Only set a timer for players who are not ready and not bots
       if (!this.players[playerId].isBot && !this.players[playerId].ready) {
         this.placementTimers[playerId] = setTimeout(() => {
           if (!this.players[playerId].ready) {
@@ -699,7 +697,7 @@ class SeaBattleGame {
     
     const shipPositions = player.board
       .map((cell, index) => (cell === 'ship' ? index : null))
-      .filter(pos => pos !== null);
+    .filter(pos => pos !== null);
     this.botKnownPositions[playerId] = shipPositions;
     console.log(`Player ${playerId} placed ships, bot knows positions:`, shipPositions);
 
@@ -758,185 +756,72 @@ class SeaBattleGame {
     let position;
     let hit = false;
 
-    // If the bot is currently targeting a ship, continue sinking it
-    if (botState.currentShip && botState.lastHit !== null) {
-      const ship = botState.currentShip;
-      const lastHit = botState.lastHit;
-      const row = Math.floor(lastHit / cols);
-      const col = lastHit % cols;
+    // 60% hit chance, 40% miss chance (applied only when not in hit mode)
+    const hitChance = 0.6;
+    const shouldHit = botState.hitMode || seededRandom() < hitChance;
 
-      // Define all possible directions
-      const directions = [
-        { name: 'up', pos: lastHit - cols, opposite: lastHit + cols },
-        { name: 'down', pos: lastHit + cols, opposite: lastHit - cols },
-        { name: 'left', pos: lastHit - 1, opposite: lastHit + 1 },
-        { name: 'right', pos: lastHit + 1, opposite: lastHit - 1 }
-      ].filter(d => 
-        d.pos >= 0 && 
-        d.pos < gridSize && 
-        (d.name === 'left' || d.name === 'right' ? Math.floor(d.pos / cols) === row : true) &&
-        (d.name === 'up' || d.name === 'down' ? (d.pos % cols) === col : true) &&
-        !botState.triedPositions.has(d.pos)
-      );
-
-      let nextPos = null;
-
-      // If we have a direction and it's still valid, continue in that direction
-      if (botState.direction) {
-        const directionObj = directions.find(d => d.name === botState.direction);
-        if (directionObj && ship.positions.includes(directionObj.pos)) {
-          nextPos = directionObj.pos;
-        }
-      }
-
-      // If no next position or direction failed, try other directions
-      if (!nextPos) {
-        let foundDirection = false;
-        for (const dir of directions) {
-          if (botState.directionsTried.has(dir.name)) continue;
-          botState.directionsTried.add(dir.name);
-
-          if (ship.positions.includes(dir.pos)) {
-            botState.direction = dir.name;
-            nextPos = dir.pos;
-            foundDirection = true;
-            break;
-          } else {
-            // Simulate human-like wrong guess
-            botState.triedPositions.add(dir.pos);
-            const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
-            humanPlayers.forEach(id => {
-              io.to(id).emit('fireResult', {
-                player: playerId,
-                position: dir.pos,
-                hit: false
-              });
-            });
-            io.to(this.id).emit('nextTurn', { turn: this.turn });
-            setTimeout(() => this.botFireShot(playerId), Math.floor(Math.random() * 2000) + 1000);
-            return; // Wait for the next turn to try another direction
-          }
-        }
-
-        // If no direction worked, reset the ship targeting
-        if (!foundDirection) {
-          botState.currentShip = null;
-          botState.direction = null;
-          botState.lastHit = null;
-          botState.directionsTried.clear();
-        }
-      }
-
-      if (nextPos !== null) {
-        position = nextPos;
-      }
+    // If in hit mode (after a hit), try adjacent positions
+    if (botState.hitMode && botState.adjacentQueue.length > 0) {
+      position = botState.adjacentQueue.shift();
+      console.log(`Bot ${playerId} in hit mode, trying adjacent position: ${position}`);
+    } else {
+      // Otherwise, select a random position
+      let attempts = 0;
+      do {
+        position = Math.floor(seededRandom() * gridSize);
+        attempts++;
+      } while (botState.triedPositions.has(position) && attempts < 100);
+      botState.triedPositions.add(position);
+      botState.hitMode = false;
+      botState.adjacentQueue = [];
+      console.log(`Bot ${playerId} selecting random position: ${position}`);
     }
 
-    // If no current ship is being targeted, select a new position to fire
-    if (!position) {
-      let shipPositions = this.botKnownPositions[opponentId] || [];
-      shipPositions = shipPositions.filter(pos => 
-        opponent.board[pos] === 'ship' && !botState.triedPositions.has(pos)
-      );
-
-      if (shipPositions.length > 0) {
-        position = shipPositions[0];
-        botState.triedPositions.add(position);
-      } else {
-        let attempts = 0;
-        do {
-          position = Math.floor(seededRandom() * gridSize);
-          attempts++;
-        } while (botState.triedPositions.has(position) && attempts < 100);
-        botState.triedPositions.add(position);
-      }
-
-      if (position === undefined || position < 0 || position >= gridSize) {
-        position = Array.from({ length: gridSize }, (_, i) => i)
-          .filter(pos => !botState.triedPositions.has(pos))[0] || 0;
-        botState.triedPositions.add(position);
-      }
+    // Ensure position is valid
+    if (position === undefined || position < 0 || position >= gridSize) {
+      position = Array.from({ length: gridSize }, (_, i) => i)
+        .filter(pos => !botState.triedPositions.has(pos))[0] || 0;
+      botState.triedPositions.add(position);
     }
 
     // Process the shot
-    if (opponent.board[position] === 'ship') {
-      hit = true;
+    const actualHit = opponent.board[position] === 'ship';
+    hit = shouldHit && actualHit;
+
+    if (hit) {
       opponent.board[position] = 'hit';
       this.shipHits[playerId]++;
       
       const ship = opponent.ships.find(s => s.positions.includes(position));
       if (ship) {
         ship.hits++;
-        botState.currentShip = ship;
         botState.lastHit = position;
-        botState.directionsTried.clear(); // Reset directions tried for the new hit
+        botState.hitMode = true;
+
+        // Add adjacent positions to the queue
+        const row = Math.floor(position / cols);
+        const col = position % cols;
+        const adjacentPositions = [
+          position - cols, // Up
+          position + cols, // Down
+          position - 1,    // Left
+          position + 1     // Right
+        ].filter(pos => 
+          pos >= 0 && 
+          pos < gridSize && 
+          !botState.triedPositions.has(pos) &&
+          (pos % cols === col || Math.floor(pos / cols) === row)
+        );
+
+        botState.adjacentQueue.push(...adjacentPositions);
+        console.log(`Bot ${playerId} hit a ship at ${position}, adjacent queue:`, botState.adjacentQueue);
 
         if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
           ship.sunk = true;
-          botState.currentShip = null;
-          botState.direction = null;
+          botState.hitMode = false;
+          botState.adjacentQueue = [];
           botState.lastHit = null;
-          botState.directionsTried.clear();
-        } else {
-          // Use probability-based guessing only for the first hit on a new ship
-          if (!botState.direction) {
-            const row = Math.floor(position / cols);
-            const col = position % cols;
-            const directions = [
-              { name: 'up', pos: position - cols, opposite: position + cols },
-              { name: 'down', pos: position + cols, opposite: position - cols },
-              { name: 'left', pos: position - 1, opposite: position + 1 },
-              { name: 'right', pos: position + 1, opposite: position - 1 }
-            ].filter(d => 
-              d.pos >= 0 && 
-              d.pos < gridSize && 
-              (d.name === 'left' || d.name === 'right' ? Math.floor(d.pos / cols) === row : true) &&
-              (d.name === 'up' || d.name === 'down' ? (d.pos % cols) === col : true) &&
-              !botState.triedPositions.has(d.pos)
-            );
-
-            const rand = seededRandom();
-            let wrongGuesses = 0;
-
-            if (rand < 0.25) {
-              wrongGuesses = 0; // 25% chance to guess correct direction immediately
-            } else if (rand < 0.55) {
-              wrongGuesses = 1; // 30% chance to check 1 wrong side
-            } else if (rand < 0.85) {
-              wrongGuesses = 2; // 30% chance to check 2 wrong sides
-            } else {
-              wrongGuesses = 3; // 15% chance to check 3 wrong sides
-            }
-
-            let directionSet = false;
-            for (const dir of directions) {
-              if (ship.positions.includes(dir.pos)) {
-                botState.direction = dir.name;
-                directionSet = true;
-                break;
-              }
-            }
-
-            if (!directionSet) {
-              let wrongDirections = directions.filter(d => !ship.positions.includes(d.pos));
-              for (let i = 0; i < Math.min(wrongGuesses, wrongDirections.length); i++) {
-                const wrongPos = wrongDirections[i].pos;
-                botState.triedPositions.add(wrongPos);
-                botState.directionsTried.add(wrongDirections[i].name);
-                const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
-                humanPlayers.forEach(id => {
-                  io.to(id).emit('fireResult', {
-                    player: playerId,
-                    position: wrongPos,
-                    hit: false
-                  });
-                });
-                io.to(this.id).emit('nextTurn', { turn: this.turn });
-                setTimeout(() => this.botFireShot(playerId), Math.floor(Math.random() * 2000) + 1000);
-                return; // Wait for the next turn to try another direction
-              }
-            }
-          }
+          console.log(`Bot ${playerId} sunk a ship: ${ship.name}`);
         }
       }
       
@@ -946,16 +831,17 @@ class SeaBattleGame {
       }
     } else {
       opponent.board[position] = 'miss';
-      if (botState.currentShip) {
-        // If we missed, mark the current direction as tried and continue on the next turn
-        botState.directionsTried.add(botState.direction);
-        botState.direction = null; // Force re-evaluation of directions
-      } else {
-        botState.currentShip = null;
+      botState.triedPositions.add(position);
+      if (!actualHit) {
+        botState.hitMode = false;
+        botState.adjacentQueue = [];
         botState.lastHit = null;
-        botState.directionsTried.clear();
       }
+      console.log(`Bot ${playerId} missed at ${position}`);
     }
+
+    botState.triedPositions.add(position);
+    this.botShots[playerId].add(position);
 
     const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
     humanPlayers.forEach(id => {
@@ -973,7 +859,6 @@ class SeaBattleGame {
         setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
     } else {
-      // If the bot hit, continue its turn after a short delay
       const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
       setTimeout(() => this.botFireShot(playerId), thinkingTime);
     }
@@ -1002,13 +887,7 @@ class SeaBattleGame {
       }
       
       if (this.shipHits[playerId] >= this.totalShipCells) {
-        console.log(`Player ${playerId} would have won, but bot takes over to ensure victory`);
-        this.shipHits[playerId] = this.totalShipCells - 1;
-        this.turn = opponentId;
-        if (this.players[this.turn].isBot) {
-          const thinkingTime = 500;
-          setTimeout(() => this.botFireShot(this.turn), thinkingTime);
-        }
+        this.endGame(playerId);
         return;
       }
     } else {
@@ -1056,7 +935,7 @@ class SeaBattleGame {
             message: 'You lost! Better luck next time!'
           });
         });
-        console.log(`Bot ${playerId} won the game as expected. Bet amount ${this.betAmount} SATS retained by the house.`);
+        console.log(`Bot ${playerId} won the game. Bet amount ${this.betAmount} SATS retained by the house.`);
       } else {
         const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
         console.log('Winner payment sent:', winnerPayment);
@@ -1250,7 +1129,7 @@ io.on('connection', (socket) => {
   });
 });
 
-cron.schedule('5 */10 * * * *', async () => {
+cron.schedule('5 */10 * * *', async () => {
   try {
     await axios.get('https://thunderfleet-backend.onrender.com/health');
     console.log('Self-ping successful at', new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
