@@ -769,28 +769,20 @@ class SeaBattleGame {
     const knownShipPositions = this.botKnownPositions[opponentId] || [];
     const untriedKnownPositions = knownShipPositions.filter(pos => !botState.triedPositions.has(pos));
 
-    // Simulate human-like behavior: occasionally miss, retry, or hesitate
-    if (seededRandom() < 0.25 && botState.triedPositions.size > 0) {
-      // 25% chance to "make a mistake" by retrying a known position
+    // Simulate human-like behavior: occasionally miss or retry a position
+    if (seededRandom() < 0.15 && botState.triedPositions.size > 0) {
+      // 15% chance to "make a mistake" by retrying a known position
       const triedArray = Array.from(botState.triedPositions);
       position = triedArray[Math.floor(seededRandom() * triedArray.length)];
       console.log(`Bot ${playerId} simulating human error, retrying position: ${position}`);
-    } else if (seededRandom() < 0.20 && untriedKnownPositions.length > 0) {
-      // 20% chance to intentionally miss to appear human-like
+    } else if (seededRandom() < 0.1 && untriedKnownPositions.length > 0) {
+      // 10% chance to intentionally miss to appear human-like
       const untriedNonShipPositions = Array.from({ length: gridSize }, (_, i) => i)
         .filter(pos => !knownShipPositions.includes(pos) && !botState.triedPositions.has(pos));
       if (untriedNonShipPositions.length > 0) {
         position = untriedNonShipPositions[Math.floor(seededRandom() * untriedNonShipPositions.length)];
         simulateMiss = true;
         console.log(`Bot ${playerId} simulating human-like miss at position: ${position}`);
-      }
-    } else if (botState.hitMode && botState.adjacentQueue.length > 0 && seededRandom() < 0.10) {
-      // 10% chance to "hesitate" by targeting a non-adjacent cell when in hitMode
-      const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
-        .filter(pos => !botState.triedPositions.has(pos));
-      if (untriedPositions.length > 0) {
-        position = untriedPositions[Math.floor(seededRandom() * untriedPositions.length)];
-        console.log(`Bot ${playerId} simulating hesitation, targeting non-adjacent position: ${position}`);
       }
     }
 
