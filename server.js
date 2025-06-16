@@ -1,39 +1,39 @@
 require('dotenv').config();
-console.log('Debug-2025-06-16-1: dotenv loaded');
+console.log('Debug-2025-06-16-2: dotenv loaded');
 
 const express = require('express');
-console.log('Debug-2025-06-16-1: express loaded');
+console.log('Debug-2025-06-16-2: express loaded');
 
 const socketio = require('socket.io');
-console.log('Debug-2025-06-16-1: socket.io loaded');
+console.log('Debug-2025-06-16-2: socket.io loaded');
 
 const http = require('http');
-console.log('Debug-2025-06-16-1: http loaded');
+console.log('Debug-2025-06-16-2: http loaded');
 
 const cors = require('cors');
-console.log('Debug-2025-06-16-1: cors loaded');
+console.log('Debug-2025-06-16-2: cors loaded');
 
 const axios = require('axios');
-console.log('Debug-2025-06-16-1: axios loaded');
+console.log('Debug-2025-06-16-2: axios loaded');
 
 const { bech32 } = require('bech32');
-console.log('Debug-2025-06-16-1: bech32 loaded');
+console.log('Debug-2025-06-16-2: bech32 loaded');
 
 const cron = require('node-cron');
-console.log('Debug-2025-06-16-1: node-cron loaded');
+console.log('Debug-2025-06-16-2: node-cron loaded');
 
 const crypto = require('crypto');
-console.log('Debug-2025-06-16-1: crypto loaded');
+console.log('Debug-2025-06-16-2: crypto loaded');
 
 const rateLimit = require('express-rate-limit');
-console.log('Debug-2025-06-16-1: express-rate-limit loaded');
+console.log('Debug-2025-06-16-2: express-rate-limit loaded');
 
 const app = express();
-console.log('Debug-2025-06-16-1: express app created');
+console.log('Debug-2025-06-16-2: express app created');
 
 // Enable trust proxy to handle X-Forwarded-For headers correctly
 app.set('trust proxy', true);
-console.log('Debug-2025-06-16-1: Trust proxy enabled');
+console.log('Debug-2025-06-16-2: Trust proxy enabled');
 
 // Dynamic CORS setup to allow all origins for development
 app.use(cors({
@@ -41,7 +41,7 @@ app.use(cors({
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
 }));
-console.log('Debug-2025-06-16-1: CORS middleware applied');
+console.log('Debug-2025-06-16-2: CORS middleware applied');
 
 // Parse JSON bodies for webhook
 app.use(express.json());
@@ -51,19 +51,19 @@ const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100
 });
-console.log('Debug-2025-06-16-1: Rate limiter configured');
+console.log('Debug-2025-06-16-2: Rate limiter configured');
 
 // Add root route to fix "Cannot GET /" error
 app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
-console.log('Debug-2025-06-16-1: Root route added');
+console.log('Debug-2025-06-16-2: Root route added');
 
 // Add health check endpoint for UptimeRobot
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
-console.log('Debug-2025-06-16-1: Health route added');
+console.log('Debug-2025-06-16-2: Health route added');
 
 // Global map of invoice IDs to player sockets for payment verification
 const invoiceToSocket = {};
@@ -84,12 +84,14 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
       case 'payment.confirmed':
         const invoiceId = event.data?.object?.id;
         if (!invoiceId) {
-          throw new Error('No invoiceId in webhook payload');
+          console.error('Webhook error: No invoiceId in webhook payload');
+          return res.status(400).send('No invoiceId in webhook payload');
         }
 
         const socket = invoiceToSocket[invoiceId];
         if (!socket) {
-          throw new Error(`No socket found for invoice ${invoiceId}`);
+          console.warn(`Webhook warning: No socket found for invoice ${invoiceId}. Player may have disconnected.`);
+          return res.status(200).send('Webhook received but no socket found');
         }
 
         socket.emit('paymentVerified');
@@ -116,7 +118,8 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
       case 'payment.failed':
         const failedInvoiceId = event.data?.object?.id;
         if (!failedInvoiceId) {
-          throw new Error('No invoiceId in webhook payload');
+          console.error('Webhook error: No invoiceId in webhook payload for payment.failed');
+          return res.status(400).send('No invoiceId in webhook payload');
         }
 
         const failedSocket = invoiceToSocket[failedInvoiceId];
@@ -125,6 +128,8 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
           console.log(`Payment failed for player ${failedSocket.id}: ${failedInvoiceId}`);
           delete players[failedSocket.id];
           delete invoiceToSocket[failedInvoiceId];
+        } else {
+          console.warn(`Webhook warning: No socket found for failed invoice ${failedInvoiceId}. Player may have disconnected.`);
         }
         break;
 
@@ -138,10 +143,10 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
     res.status(500).send('Webhook processing failed');
   }
 });
-console.log('Debug-2025-06-16-1: Webhook route added');
+console.log('Debug-2025-06-16-2: Webhook route added');
 
 const server = http.createServer(app);
-console.log('Debug-2025-06-16-1: HTTP server created');
+console.log('Debug-2025-06-16-2: HTTP server created');
 
 const io = socketio(server, {
   cors: {
@@ -150,14 +155,14 @@ const io = socketio(server, {
   },
   transports: ['polling']
 });
-console.log('Debug-2025-06-16-1: Socket.IO initialized');
+console.log('Debug-2025-06-16-2: Socket.IO initialized');
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
-console.log('Starting server... Debug-2025-06-16-1');
+console.log('Starting server... Debug-2025-06-16-2');
 
 if (!SPEED_WALLET_SECRET_KEY) {
   console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
@@ -169,7 +174,7 @@ if (!SPEED_WALLET_WEBHOOK_SECRET) {
   process.exit(1);
 }
 
-console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-16-1)`);
+console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-16-2)`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
@@ -380,6 +385,7 @@ class SeaBattleGame {
     this.totalShipCells = SHIP_CONFIG.reduce((sum, ship) => sum + ship.size, 0);
     this.botKnownPositions = {};
     this.botShots = {};
+    this.botMissStreak = {};
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -401,10 +407,10 @@ class SeaBattleGame {
         lastHit: null,
         adjacentQueue: [],
         triedPositions: new Set(),
-        hitMode: false,
-        currentTargetShip: null // Track the ship being targeted
+        hitMode: false
       };
       this.botShots[playerId] = new Set();
+      this.botMissStreak[playerId] = 0;
       this.autoPlaceShips(playerId);
       this.players[playerId].ready = true;
       console.log(`Bot ${playerId} joined and placed ships automatically.`);
@@ -757,69 +763,77 @@ class SeaBattleGame {
     let position;
     let hit = false;
 
-    // Use known ship positions to ensure bot always wins
-    const knownPositions = this.botKnownPositions[opponentId] || [];
-    const untriedKnownPositions = knownPositions.filter(pos => !botState.triedPositions.has(pos));
+    if (!this.botMissStreak[playerId]) this.botMissStreak[playerId] = 0;
 
-    if (untriedKnownPositions.length > 0) {
-      // Prioritize known positions
-      position = untriedKnownPositions[0]; // Take the first untried known position
-      console.log(`Bot ${playerId} targeting known position: ${position}`);
-    } else {
-      // If no known positions left (shouldn't happen since bot knows all), fall back to random
-      const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
-        .filter(pos => !botState.triedPositions.has(pos));
-      position = untriedPositions[Math.floor(seededRandom() * untriedPositions.length)];
-      console.log(`Bot ${playerId} selecting random position (fallback): ${position}`);
+    if (seededRandom() < 0.1) {
+      const triedArray = Array.from(botState.triedPositions);
+      if (triedArray.length > 0) {
+        position = triedArray[Math.floor(seededRandom() * triedArray.length)];
+        console.log(`Bot ${playerId} made a mistake, retrying position: ${position}`);
+      }
     }
 
-    // Process the shot
+    if (position === undefined) {
+      if (botState.hitMode && botState.adjacentQueue.length > 0) {
+        position = botState.adjacentQueue.shift();
+        console.log(`Bot ${playerId} in hit mode, trying adjacent position: ${position}`);
+      } else {
+        if (this.botMissStreak[playerId] >= 3) {
+          const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
+            .filter(pos => !botState.triedPositions.has(pos));
+          const checkeredPositions = untriedPositions.filter(pos => (pos % 2) === (Math.floor(pos / cols) % 2));
+          position = checkeredPositions[Math.floor(seededRandom() * checkeredPositions.length)] || untriedPositions[0];
+          console.log(`Bot ${playerId} using checkered pattern after ${this.botMissStreak[playerId]} misses: ${position}`);
+        } else {
+          const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
+            .filter(pos => !botState.triedPositions.has(pos));
+          position = untriedPositions[Math.floor(seededRandom() * untriedPositions.length)];
+          console.log(`Bot ${playerId} selecting random position: ${position}`);
+        }
+        botState.hitMode = false;
+        botState.adjacentQueue = [];
+      }
+    }
+
+    if (position === undefined || position < 0 || position >= gridSize) {
+      position = Array.from({ length: gridSize }, (_, i) => i)
+        .filter(pos => !botState.triedPositions.has(pos))[0] || 0;
+      botState.triedPositions.add(position);
+    }
+
     hit = opponent.board[position] === 'ship';
 
     if (hit) {
       opponent.board[position] = 'hit';
       this.shipHits[playerId]++;
+      this.botMissStreak[playerId] = 0;
       
       const ship = opponent.ships.find(s => s.positions.includes(position));
       if (ship) {
         ship.hits++;
         botState.lastHit = position;
         botState.hitMode = true;
-        botState.currentTargetShip = ship;
 
-        // Add adjacent positions with 70% probability
         const row = Math.floor(position / cols);
         const col = position % cols;
         const adjacentPositions = [];
-        if (row > 0) adjacentPositions.push(position - cols); // Up
-        if (row < rows - 1) adjacentPositions.push(position + cols); // Down
-        if (col > 0) adjacentPositions.push(position - 1); // Left
-        if (col < cols - 1) adjacentPositions.push(position + 1); // Right
+        if (row > 0) adjacentPositions.push(position - cols);
+        if (row < rows - 1) adjacentPositions.push(position + cols);
+        if (col > 0) adjacentPositions.push(position - 1);
+        if (col < cols - 1) adjacentPositions.push(position + 1);
 
         const validAdjacent = adjacentPositions.filter(pos => 
           pos >= 0 && pos < gridSize && !botState.triedPositions.has(pos)
         );
+        botState.adjacentQueue.push(...validAdjacent);
+        console.log(`Bot ${playerId} hit a ship at ${position}, adjacent queue:`, botState.adjacentQueue);
 
-        // 70% chance to target adjacent positions
-        if (seededRandom() < 0.7) {
-          botState.adjacentQueue.push(...validAdjacent);
-          console.log(`Bot ${playerId} hit a ship at ${position}, added adjacent positions (70% chance):`, botState.adjacentQueue);
-        } else {
-          console.log(`Bot ${playerId} hit a ship at ${position}, but skipped adjacent targeting (30% chance)`);
-        }
-
-        // Continue targeting adjacent positions until the ship is sunk
         if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
           ship.sunk = true;
           botState.hitMode = false;
           botState.adjacentQueue = [];
           botState.lastHit = null;
-          botState.currentTargetShip = null;
           console.log(`Bot ${playerId} sunk a ship: ${ship.name}`);
-        } else if (botState.adjacentQueue.length > 0) {
-          // Continue targeting adjacent positions of the current ship
-          position = botState.adjacentQueue.shift();
-          console.log(`Bot ${playerId} continuing to target adjacent position for ${ship.name}: ${position}`);
         }
       }
       
@@ -830,10 +844,11 @@ class SeaBattleGame {
     } else {
       opponent.board[position] = 'miss';
       botState.triedPositions.add(position);
+      this.botMissStreak[playerId]++;
       botState.hitMode = false;
       botState.adjacentQueue = [];
       botState.lastHit = null;
-      console.log(`Bot ${playerId} missed at ${position}`);
+      console.log(`Bot ${playerId} missed at ${position}, miss streak: ${this.botMissStreak[playerId]}`);
     }
 
     botState.triedPositions.add(position);
@@ -851,11 +866,11 @@ class SeaBattleGame {
     if (!hit) {
       this.turn = opponentId;
       if (this.players[this.turn].isBot) {
-        const thinkingTime = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
+        const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
         setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
     } else {
-      const thinkingTime = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
+      const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
       setTimeout(() => this.botFireShot(playerId), thinkingTime);
     }
     io.to(this.id).emit('nextTurn', { turn: this.turn });
@@ -1032,6 +1047,7 @@ io.on('connection', (socket) => {
       socket.on('disconnect', () => {
         clearTimeout(paymentTimeout);
         delete invoiceToSocket[invoiceData.invoiceId];
+        console.log(`Socket ${socket.id} disconnected, removed from invoiceToSocket`);
       });
     } catch (error) {
       console.error('Join error:', error.message);
