@@ -1,4 +1,3 @@
-// @ts-nocheck
 require('dotenv').config();
 console.log('Debug-2025-06-15-3: dotenv loaded');
 
@@ -38,7 +37,7 @@ console.log('Debug-2025-06-15-3: Trust proxy enabled');
 
 // Dynamic CORS setup to allow all origins for development
 app.use(cors({
-  origin: '*', // Allow all origins for development; tighten in production
+  origin: '*',
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
 }));
@@ -49,8 +48,8 @@ app.use(express.json());
 
 // Rate limit for webhook endpoint
 const webhookLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // Limit to 100 requests per window
+  windowMs: 15 * 60 * 1000,
+  max: 100
 });
 console.log('Debug-2025-06-15-3: Rate limiter configured');
 
@@ -146,10 +145,10 @@ console.log('Debug-2025-06-15-3: HTTP server created');
 
 const io = socketio(server, {
   cors: {
-    origin: '*', // Allow all origins for development; tighten in production
+    origin: '*',
     methods: ["GET", "POST"]
   },
-  transports: ['polling'] // Force polling only, since WebSocket fails on Render
+  transports: ['polling']
 });
 console.log('Debug-2025-06-15-3: Socket.IO initialized');
 
@@ -186,7 +185,7 @@ const BOT_JOIN_DELAYS = [10, 15, 20, 25];
 const GRID_COLS = 9;
 const GRID_ROWS = 7;
 const GRID_SIZE = GRID_COLS * GRID_ROWS;
-const PLACEMENT_TIME = 45; // Adjusted to match frontend
+const PLACEMENT_TIME = 45;
 const SHIP_CONFIG = [
   { name: 'Aircraft Carrier', size: 5 },
   { name: 'Battleship', size: 4 },
@@ -380,7 +379,8 @@ class SeaBattleGame {
     this.shipHits = {};
     this.totalShipCells = SHIP_CONFIG.reduce((sum, ship) => sum + ship.size, 0);
     this.botKnownPositions = {};
-    this.botShots = {}; // Track shots fired by the bot
+    this.botShots = {};
+    this.botMissStreak = {}; // Track consecutive misses for each bot
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -405,6 +405,7 @@ class SeaBattleGame {
         hitMode: false
       };
       this.botShots[playerId] = new Set();
+      this.botMissStreak[playerId] = 0; // Initialize miss streak
       this.autoPlaceShips(playerId);
       this.players[playerId].ready = true;
       console.log(`Bot ${playerId} joined and placed ships automatically.`);
@@ -738,7 +739,7 @@ class SeaBattleGame {
     });
 
     if (this.players[this.turn].isBot) {
-      const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
+      const thinkingTime = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
       setTimeout(() => this.botFireShot(this.turn), thinkingTime);
     }
   }
@@ -750,31 +751,49 @@ class SeaBattleGame {
     const opponentId = Object.keys(this.players).find(id => id !== playerId);
     const opponent = this.players[opponentId];
     const cols = GRID_COLS;
+    const rows = GRID_ROWS;
     const gridSize = GRID_SIZE;
     const seededRandom = this.randomGenerators[playerId];
 
     let position;
     let hit = false;
 
-    // 60% hit chance, 40% miss chance (applied only when not in hit mode)
-    const hitChance = 0.6;
-    const shouldHit = botState.hitMode || seededRandom() < hitChance;
+    // Track consecutive misses
+    if (!this.botMissStreak[playerId]) this.botMissStreak[playerId] = 0;
 
-    // If in hit mode (after a hit), try adjacent positions
-    if (botState.hitMode && botState.adjacentQueue.length > 0) {
-      position = botState.adjacentQueue.shift();
-      console.log(`Bot ${playerId} in hit mode, trying adjacent position: ${position}`);
-    } else {
-      // Otherwise, select a random position
-      let attempts = 0;
-      do {
-        position = Math.floor(seededRandom() * gridSize);
-        attempts++;
-      } while (botState.triedPositions.has(position) && attempts < 100);
-      botState.triedPositions.add(position);
-      botState.hitMode = false;
-      botState.adjacentQueue = [];
-      console.log(`Bot ${playerId} selecting random position: ${position}`);
+    // 10% chance to "forget" and shoot a previously tried position
+    if (seededRandom() < 0.1) {
+      const triedArray = Array.from(botState.triedPositions);
+      if (triedArray.length > 0) {
+        position = triedArray[Math.floor(seededRandom() * triedArray.length)];
+        console.log(`Bot ${playerId} made a mistake, retrying position: ${position}`);
+      }
+    }
+
+    // If no mistake, proceed with normal logic
+    if (position === undefined) {
+      // If in hit mode, try adjacent positions
+      if (botState.hitMode && botState.adjacentQueue.length > 0) {
+        position = botState.adjacentQueue.shift();
+        console.log(`Bot ${playerId} in hit mode, trying adjacent position: ${position}`);
+      } else {
+        // After 3 consecutive misses, switch to a systematic checkered pattern
+        if (this.botMissStreak[playerId] >= 3) {
+          const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
+            .filter(pos => !botState.triedPositions.has(pos));
+          const checkeredPositions = untriedPositions.filter(pos => (pos % 2) === (Math.floor(pos / cols) % 2));
+          position = checkeredPositions[Math.floor(seededRandom() * checkeredPositions.length)] || untriedPositions[0];
+          console.log(`Bot ${playerId} using checkered pattern after ${this.botMissStreak[playerId]} misses: ${position}`);
+        } else {
+          // Otherwise, select a random untried position
+          const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
+            .filter(pos => !botState.triedPositions.has(pos));
+          position = untriedPositions[Math.floor(seededRandom() * untriedPositions.length)];
+          console.log(`Bot ${playerId} selecting random position: ${position}`);
+        }
+        botState.hitMode = false;
+        botState.adjacentQueue = [];
+      }
     }
 
     // Ensure position is valid
@@ -785,12 +804,12 @@ class SeaBattleGame {
     }
 
     // Process the shot
-    const actualHit = opponent.board[position] === 'ship';
-    hit = shouldHit && actualHit;
+    hit = opponent.board[position] === 'ship';
 
     if (hit) {
       opponent.board[position] = 'hit';
       this.shipHits[playerId]++;
+      this.botMissStreak[playerId] = 0; // Reset miss streak on hit
       
       const ship = opponent.ships.find(s => s.positions.includes(position));
       if (ship) {
@@ -798,22 +817,22 @@ class SeaBattleGame {
         botState.lastHit = position;
         botState.hitMode = true;
 
-        // Add adjacent positions to the queue
+        // Add adjacent positions, ensuring alignment with ship orientation
         const row = Math.floor(position / cols);
         const col = position % cols;
-        const adjacentPositions = [
-          position - cols, // Up
-          position + cols, // Down
-          position - 1,    // Left
-          position + 1     // Right
-        ].filter(pos => 
-          pos >= 0 && 
-          pos < gridSize && 
-          !botState.triedPositions.has(pos) &&
-          (pos % cols === col || Math.floor(pos / cols) === row)
-        );
+        const adjacentPositions = [];
+        // Add vertical positions (up and down)
+        if (row > 0) adjacentPositions.push(position - cols); // Up
+        if (row < rows - 1) adjacentPositions.push(position + cols); // Down
+        // Add horizontal positions (left and right)
+        if (col > 0) adjacentPositions.push(position - 1); // Left
+        if (col < cols - 1) adjacentPositions.push(position + 1); // Right
 
-        botState.adjacentQueue.push(...adjacentPositions);
+        // Filter out tried positions
+        const validAdjacent = adjacentPositions.filter(pos => 
+          pos >= 0 && pos < gridSize && !botState.triedPositions.has(pos)
+        );
+        botState.adjacentQueue.push(...validAdjacent);
         console.log(`Bot ${playerId} hit a ship at ${position}, adjacent queue:`, botState.adjacentQueue);
 
         if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
@@ -832,12 +851,11 @@ class SeaBattleGame {
     } else {
       opponent.board[position] = 'miss';
       botState.triedPositions.add(position);
-      if (!actualHit) {
-        botState.hitMode = false;
-        botState.adjacentQueue = [];
-        botState.lastHit = null;
-      }
-      console.log(`Bot ${playerId} missed at ${position}`);
+      this.botMissStreak[playerId]++; // Increment miss streak
+      botState.hitMode = false;
+      botState.adjacentQueue = [];
+      botState.lastHit = null;
+      console.log(`Bot ${playerId} missed at ${position}, miss streak: ${this.botMissStreak[playerId]}`);
     }
 
     botState.triedPositions.add(position);
@@ -855,11 +873,11 @@ class SeaBattleGame {
     if (!hit) {
       this.turn = opponentId;
       if (this.players[this.turn].isBot) {
-        const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
+        const thinkingTime = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
         setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
     } else {
-      const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
+      const thinkingTime = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
       setTimeout(() => this.botFireShot(playerId), thinkingTime);
     }
     io.to(this.id).emit('nextTurn', { turn: this.turn });
