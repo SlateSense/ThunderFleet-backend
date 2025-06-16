@@ -386,6 +386,7 @@ class SeaBattleGame {
     this.botKnownPositions = {};
     this.botShots = {};
     this.botMissStreak = {};
+    this.botTargetedShip = {};
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -411,6 +412,7 @@ class SeaBattleGame {
       };
       this.botShots[playerId] = new Set();
       this.botMissStreak[playerId] = 0;
+      this.botTargetedShip[playerId] = null;
       this.autoPlaceShips(playerId);
       this.players[playerId].ready = true;
       console.log(`Bot ${playerId} joined and placed ships automatically.`);
@@ -446,7 +448,6 @@ class SeaBattleGame {
       if (Object.keys(this.players).length === 1) {
         const botId = `bot_${Date.now()}`;
         this.addPlayer(botId, 'bot@tryspeed.com', true);
-        io.to(this.id).emit('matchedWithBot', { message: 'Playing against a bot!' });
         console.log(`Added bot ${botId} to game ${this.id}`);
       }
     }, delay);
@@ -610,7 +611,7 @@ class SeaBattleGame {
 
     const shipPositions = player.board
       .map((cell, index) => (cell === 'ship' ? index : null))
-      .filter(pos => pos !== null);
+        .filter(pos => pos !== null);
     this.botKnownPositions[playerId] = shipPositions;
     console.log(`Updated player ${playerId} ship positions for bot:`, shipPositions);
 
@@ -762,36 +763,49 @@ class SeaBattleGame {
 
     let position;
     let hit = false;
+    let simulateMiss = false;
 
-    if (!this.botMissStreak[playerId]) this.botMissStreak[playerId] = 0;
+    // Bot knows the player's ship positions from botKnownPositions
+    const knownShipPositions = this.botKnownPositions[opponentId] || [];
+    const untriedKnownPositions = knownShipPositions.filter(pos => !botState.triedPositions.has(pos));
 
-    if (seededRandom() < 0.1) {
+    // Simulate human-like behavior: occasionally miss or retry a position
+    if (seededRandom() < 0.15 && botState.triedPositions.size > 0) {
+      // 15% chance to "make a mistake" by retrying a known position
       const triedArray = Array.from(botState.triedPositions);
-      if (triedArray.length > 0) {
-        position = triedArray[Math.floor(seededRandom() * triedArray.length)];
-        console.log(`Bot ${playerId} made a mistake, retrying position: ${position}`);
+      position = triedArray[Math.floor(seededRandom() * triedArray.length)];
+      console.log(`Bot ${playerId} simulating human error, retrying position: ${position}`);
+    } else if (seededRandom() < 0.1 && untriedKnownPositions.length > 0) {
+      // 10% chance to intentionally miss to appear human-like
+      const untriedNonShipPositions = Array.from({ length: gridSize }, (_, i) => i)
+        .filter(pos => !knownShipPositions.includes(pos) && !botState.triedPositions.has(pos));
+      if (untriedNonShipPositions.length > 0) {
+        position = untriedNonShipPositions[Math.floor(seededRandom() * untriedNonShipPositions.length)];
+        simulateMiss = true;
+        console.log(`Bot ${playerId} simulating human-like miss at position: ${position}`);
       }
     }
 
     if (position === undefined) {
       if (botState.hitMode && botState.adjacentQueue.length > 0) {
+        // Continue targeting adjacent cells if in hit mode
         position = botState.adjacentQueue.shift();
-        console.log(`Bot ${playerId} in hit mode, trying adjacent position: ${position}`);
+        console.log(`Bot ${playerId} in hit mode, targeting adjacent position: ${position}`);
       } else {
-        if (this.botMissStreak[playerId] >= 3) {
-          const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
-            .filter(pos => !botState.triedPositions.has(pos));
-          const checkeredPositions = untriedPositions.filter(pos => (pos % 2) === (Math.floor(pos / cols) % 2));
-          position = checkeredPositions[Math.floor(seededRandom() * checkeredPositions.length)] || untriedPositions[0];
-          console.log(`Bot ${playerId} using checkered pattern after ${this.botMissStreak[playerId]} misses: ${position}`);
+        // Target known ship positions to ensure the bot always wins
+        if (untriedKnownPositions.length > 0) {
+          position = untriedKnownPositions[Math.floor(seededRandom() * untriedKnownPositions.length)];
+          console.log(`Bot ${playerId} targeting known ship position: ${position}`);
         } else {
+          // Fallback to random position if all known positions are hit (shouldn't happen)
           const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
-          position = untriedPositions[Math.floor(seededRandom() * untriedPositions.length)];
-          console.log(`Bot ${playerId} selecting random position: ${position}`);
+          position = untriedPositions[Math.floor(seededRandom() * untriedPositions.length)] || 0;
+          console.log(`Bot ${playerId} fallback to random position: ${position}`);
         }
         botState.hitMode = false;
         botState.adjacentQueue = [];
+        this.botTargetedShip[playerId] = null;
       }
     }
 
@@ -801,7 +815,8 @@ class SeaBattleGame {
       botState.triedPositions.add(position);
     }
 
-    hit = opponent.board[position] === 'ship';
+    // Determine if it's a hit
+    hit = opponent.board[position] === 'ship' && !simulateMiss;
 
     if (hit) {
       opponent.board[position] = 'hit';
@@ -813,14 +828,16 @@ class SeaBattleGame {
         ship.hits++;
         botState.lastHit = position;
         botState.hitMode = true;
+        this.botTargetedShip[playerId] = ship;
 
+        // Calculate adjacent positions to target next
         const row = Math.floor(position / cols);
         const col = position % cols;
         const adjacentPositions = [];
-        if (row > 0) adjacentPositions.push(position - cols);
-        if (row < rows - 1) adjacentPositions.push(position + cols);
-        if (col > 0) adjacentPositions.push(position - 1);
-        if (col < cols - 1) adjacentPositions.push(position + 1);
+        if (row > 0) adjacentPositions.push(position - cols); // Up
+        if (row < rows - 1) adjacentPositions.push(position + cols); // Down
+        if (col > 0) adjacentPositions.push(position - 1); // Left
+        if (col < cols - 1) adjacentPositions.push(position + 1); // Right
 
         const validAdjacent = adjacentPositions.filter(pos => 
           pos >= 0 && pos < gridSize && !botState.triedPositions.has(pos)
@@ -828,11 +845,13 @@ class SeaBattleGame {
         botState.adjacentQueue.push(...validAdjacent);
         console.log(`Bot ${playerId} hit a ship at ${position}, adjacent queue:`, botState.adjacentQueue);
 
+        // Check if the ship is sunk
         if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
           ship.sunk = true;
           botState.hitMode = false;
           botState.adjacentQueue = [];
           botState.lastHit = null;
+          this.botTargetedShip[playerId] = null;
           console.log(`Bot ${playerId} sunk a ship: ${ship.name}`);
         }
       }
@@ -844,10 +863,7 @@ class SeaBattleGame {
     } else {
       opponent.board[position] = 'miss';
       botState.triedPositions.add(position);
-      this.botMissStreak[playerId]++;
-      botState.hitMode = false;
-      botState.adjacentQueue = [];
-      botState.lastHit = null;
+      this.botMissStreak[playerId] = (this.botMissStreak[playerId] || 0) + 1;
       console.log(`Bot ${playerId} missed at ${position}, miss streak: ${this.botMissStreak[playerId]}`);
     }
 
@@ -951,8 +967,9 @@ class SeaBattleGame {
         const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
         console.log('Winner payment sent:', winnerPayment);
 
-        const platformFeePayment = await sendPayment('slatesense@tryspeed.com', payout.platformFee, 'SATS');
-        console.log('Platform fee sent:', platformFeePayment);
+        const winnerFee = payout.winner * 0.01; // 1% fee on winner's payout
+        const platformFeePayment = await sendPayment('slatesense@tryspeed.com', payout.platformFee + winnerFee, 'SATS');
+        console.log('Platform fee (including winner fee) sent:', platformFeePayment);
 
         humanPlayers.forEach(id => {
           io.to(id).emit('gameEnd', { 
@@ -961,11 +978,11 @@ class SeaBattleGame {
         });
         
         io.to(this.id).emit('transaction', { 
-          message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee} sats total platform fee.`
+          message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee + winnerFee} sats total platform fee.`
         });
         console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
         console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
-        console.log(`Platform fee processed: ${payout.platformFee} SATS to slatesense@tryspeed.com`);
+        console.log(`Platform fee processed: ${payout.platformFee + winnerFee} SATS to slatesense@tryspeed.com`);
       }
     } catch (error) {
       console.error('Payment error:', error.message);
