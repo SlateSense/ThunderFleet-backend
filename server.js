@@ -561,23 +561,20 @@ class SeaBattleGame {
         let row = Math.floor(startPos / cols);
         let col = startPos % cols;
 
+        // Adjusted bounds checking to allow placement starting from col 0
         if (ship.horizontal) {
-          const maxCol = cols - ship.positions.length;
-          if (col > maxCol) {
-            col = maxCol;
-            ship.positions = [];
-            for (let i = 0; i < ship.positions.length; i++) {
-              ship.positions.push(row * cols + col + i);
-            }
+          if (col < 0) col = 0;
+          if (col + ship.positions.length > cols) col = cols - ship.positions.length;
+          ship.positions = [];
+          for (let i = 0; i < ship.size; i++) {
+            ship.positions.push(row * cols + col + i);
           }
         } else {
-          const maxRow = rows - ship.positions.length;
-          if (row > maxRow) {
-            row = maxRow;
-            ship.positions = [];
-            for (let i = 0; i < ship.positions.length; i++) {
-              ship.positions.push((row + i) * cols + col);
-            }
+          if (row < 0) row = 0;
+          if (row + ship.positions.length > rows) row = rows - ship.positions.length;
+          ship.positions = [];
+          for (let i = 0; i < ship.size; i++) {
+            ship.positions.push((row + i) * cols + col);
           }
         }
 
@@ -611,7 +608,7 @@ class SeaBattleGame {
 
     const shipPositions = player.board
       .map((cell, index) => (cell === 'ship' ? index : null))
-        .filter(pos => pos !== null);
+      .filter(pos => pos !== null);
     this.botKnownPositions[playerId] = shipPositions;
     console.log(`Updated player ${playerId} ship positions for bot:`, shipPositions);
 
@@ -638,40 +635,42 @@ class SeaBattleGame {
     const rows = GRID_ROWS;
     const occupied = new Set();
     
+    // Validate that all ships are placed
+    if (placements.length !== SHIP_CONFIG.length) {
+      throw new Error(`Not all ships placed. Expected ${SHIP_CONFIG.length}, got ${placements.length}`);
+    }
+
     for (const ship of placements) {
-      if (!ship.positions || !Array.isArray(ship.positions)) {
-        throw new Error('Invalid ship positions');
+      if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== ship.size) {
+        throw new Error(`Invalid ship positions for ${ship.name}`);
       }
       let startPos = ship.positions[0];
       let row = Math.floor(startPos / cols);
       let col = startPos % cols;
 
+      // Adjusted bounds checking to allow placement starting from col 0
       if (ship.horizontal) {
-        const maxCol = cols - ship.positions.length;
-        if (col > maxCol) {
-          col = maxCol;
-          ship.positions = [];
-          for (let i = 0; i < ship.positions.length; i++) {
-            ship.positions.push(row * cols + col + i);
-          }
+        if (col < 0) col = 0;
+        if (col + ship.positions.length > cols) col = cols - ship.positions.length;
+        ship.positions = [];
+        for (let i = 0; i < ship.size; i++) {
+          ship.positions.push(row * cols + col + i);
         }
       } else {
-        const maxRow = rows - ship.positions.length;
-        if (row > maxRow) {
-          row = maxRow;
-          ship.positions = [];
-          for (let i = 0; i < ship.positions.length; i++) {
-            ship.positions.push((row + i) * cols + col);
-          }
+        if (row < 0) row = 0;
+        if (row + ship.positions.length > rows) row = rows - ship.positions.length;
+        ship.positions = [];
+        for (let i = 0; i < ship.size; i++) {
+          ship.positions.push((row + i) * cols + col);
         }
       }
 
       for (const pos of ship.positions) {
         if (pos < 0 || pos >= gridSize) {
-          throw new Error(`Position ${pos} out of bounds`);
+          throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
         }
         if (occupied.has(pos)) {
-          throw new Error(`Position ${pos} already occupied`);
+          throw new Error(`Position ${pos} already occupied for ${ship.name}`);
         }
         occupied.add(pos);
       }
@@ -701,7 +700,7 @@ class SeaBattleGame {
       clearTimeout(this.placementTimers[playerId]);
       delete this.placementTimers[playerId];
     }
-    
+
     const shipPositions = player.board
       .map((cell, index) => (cell === 'ship' ? index : null))
       .filter(pos => pos !== null);
@@ -769,40 +768,33 @@ class SeaBattleGame {
     const knownShipPositions = this.botKnownPositions[opponentId] || [];
     const untriedKnownPositions = knownShipPositions.filter(pos => !botState.triedPositions.has(pos));
 
-    // Simulate human-like behavior: occasionally miss or retry a position
-    if (seededRandom() < 0.15 && botState.triedPositions.size > 0) {
-      // 15% chance to "make a mistake" by retrying a known position
+    // Simulate human-like behavior
+    const missChance = 0.15; // 15% chance to miss even on a known ship position
+    const mistakeChance = 0.10; // 10% chance to retry a position (human error)
+
+    // Check if the bot should retry a position (simulating human error)
+    if (seededRandom() < mistakeChance && botState.triedPositions.size > 0) {
       const triedArray = Array.from(botState.triedPositions);
       position = triedArray[Math.floor(seededRandom() * triedArray.length)];
       console.log(`Bot ${playerId} simulating human error, retrying position: ${position}`);
-    } else if (seededRandom() < 0.1 && untriedKnownPositions.length > 0) {
-      // 10% chance to intentionally miss to appear human-like
-      const untriedNonShipPositions = Array.from({ length: gridSize }, (_, i) => i)
-        .filter(pos => !knownShipPositions.includes(pos) && !botState.triedPositions.has(pos));
-      if (untriedNonShipPositions.length > 0) {
-        position = untriedNonShipPositions[Math.floor(seededRandom() * untriedNonShipPositions.length)];
-        simulateMiss = true;
-        console.log(`Bot ${playerId} simulating human-like miss at position: ${position}`);
-      }
-    }
-
-    if (position === undefined) {
-      if (botState.hitMode && botState.adjacentQueue.length > 0) {
-        // Continue targeting adjacent cells if in hit mode
-        position = botState.adjacentQueue.shift();
-        console.log(`Bot ${playerId} in hit mode, targeting adjacent position: ${position}`);
+    } else if (botState.hitMode && botState.adjacentQueue.length > 0) {
+      // Prioritize targeting adjacent cells to sink the current ship
+      position = botState.adjacentQueue.shift();
+      console.log(`Bot ${playerId} in hit mode, targeting adjacent position: ${position}`);
+    } else {
+      // Target known ship positions to ensure the bot eventually wins
+      if (untriedKnownPositions.length > 0) {
+        position = untriedKnownPositions[Math.floor(seededRandom() * untriedKnownPositions.length)];
+        console.log(`Bot ${playerId} targeting known ship position: ${position}`);
+        botState.hitMode = false;
+        botState.adjacentQueue = [];
+        this.botTargetedShip[playerId] = null;
       } else {
-        // Target known ship positions to ensure the bot always wins
-        if (untriedKnownPositions.length > 0) {
-          position = untriedKnownPositions[Math.floor(seededRandom() * untriedKnownPositions.length)];
-          console.log(`Bot ${playerId} targeting known ship position: ${position}`);
-        } else {
-          // Fallback to random position if all known positions are hit (shouldn't happen)
-          const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
-            .filter(pos => !botState.triedPositions.has(pos));
-          position = untriedPositions[Math.floor(seededRandom() * untriedPositions.length)] || 0;
-          console.log(`Bot ${playerId} fallback to random position: ${position}`);
-        }
+        // Fallback to random position if all known positions are hit
+        const untriedPositions = Array.from({ length: gridSize }, (_, i) => i)
+          .filter(pos => !botState.triedPositions.has(pos));
+        position = untriedPositions[Math.floor(seededRandom() * untriedPositions.length)] || 0;
+        console.log(`Bot ${playerId} fallback to random position: ${position}`);
         botState.hitMode = false;
         botState.adjacentQueue = [];
         this.botTargetedShip[playerId] = null;
@@ -816,7 +808,12 @@ class SeaBattleGame {
     }
 
     // Determine if it's a hit
-    hit = opponent.board[position] === 'ship' && !simulateMiss;
+    hit = opponent.board[position] === 'ship';
+    if (hit && seededRandom() < missChance) {
+      hit = false;
+      simulateMiss = true;
+      console.log(`Bot ${playerId} intentionally missed a known ship at position ${position} to simulate human behavior`);
+    }
 
     if (hit) {
       opponent.board[position] = 'hit';
@@ -839,11 +836,12 @@ class SeaBattleGame {
         if (col > 0) adjacentPositions.push(position - 1); // Left
         if (col < cols - 1) adjacentPositions.push(position + 1); // Right
 
+        // Filter out positions that have already been tried
         const validAdjacent = adjacentPositions.filter(pos => 
           pos >= 0 && pos < gridSize && !botState.triedPositions.has(pos)
         );
-        botState.adjacentQueue.push(...validAdjacent);
-        console.log(`Bot ${playerId} hit a ship at ${position}, adjacent queue:`, botState.adjacentQueue);
+        botState.adjacentQueue = validAdjacent; // Reset queue with new adjacent positions
+        console.log(`Bot ${playerId} hit a ship at ${position}, adjacent queue updated:`, botState.adjacentQueue);
 
         // Check if the ship is sunk
         if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
