@@ -1,45 +1,48 @@
 require('dotenv').config();
-console.log('Debug-2025-06-16-2: dotenv loaded');
+console.log('Debug-2025-06-18-1: dotenv loaded');
 
 const express = require('express');
-console.log('Debug-2025-06-16-2: express loaded');
+console.log('Debug-2025-06-18-1: express loaded');
 
 const socketio = require('socket.io');
-console.log('Debug-2025-06-16-2: socket.io loaded');
+console.log('Debug-2025-06-18-1: socket.io loaded');
 
 const http = require('http');
-console.log('Debug-2025-06-16-2: http loaded');
+console.log('Debug-2025-06-18-1: http loaded');
 
 const cors = require('cors');
-console.log('Debug-2025-06-16-2: cors loaded');
+console.log('Debug-2025-06-18-1: cors loaded');
 
 const axios = require('axios');
-console.log('Debug-2025-06-16-2: axios loaded');
+console.log('Debug-2025-06-18-1: axios loaded');
 
 const { bech32 } = require('bech32');
-console.log('Debug-2025-06-16-2: bech32 loaded');
+console.log('Debug-2025-06-18-1: bech32 loaded');
 
 const cron = require('node-cron');
-console.log('Debug-2025-06-16-2: node-cron loaded');
+console.log('Debug-2025-06-18-1: node-cron loaded');
 
 const crypto = require('crypto');
-console.log('Debug-2025-06-16-2: crypto loaded');
+console.log('Debug-2025-06-18-1: crypto loaded');
 
 const rateLimit = require('express-rate-limit');
-console.log('Debug-2025-06-16-2: express-rate-limit loaded');
+console.log('Debug-2025-06-18-1: express-rate-limit loaded');
+
+const { v4: uuidv4 } = require('uuid');
+console.log('Debug-2025-06-18-1: uuid loaded');
 
 const app = express();
-console.log('Debug-2025-06-16-2: express app created');
+console.log('Debug-2025-06-18-1: express app created');
 
 app.set('trust proxy', true);
-console.log('Debug-2025-06-16-2: Trust proxy enabled');
+console.log('Debug-2025-06-18-1: Trust proxy enabled');
 
 app.use(cors({
   origin: '*',
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
 }));
-console.log('Debug-2025-06-16-2: CORS middleware applied');
+console.log('Debug-2025-06-18-1: CORS middleware applied');
 
 app.use(express.json());
 
@@ -47,23 +50,32 @@ const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100
 });
-console.log('Debug-2025-06-16-2: Rate limiter configured');
+console.log('Debug-2025-06-18-1: Rate limiter configured');
 
 app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
-console.log('Debug-2025-06-16-2: Root route added');
+console.log('Debug-2025-06-18-1: Root route added');
 
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
-console.log('Debug-2025-06-16-2: Health route added');
+console.log('Debug-2025-06-18-1: Health route added');
 
 const invoiceToSocket = {};
 
 app.post('/webhook', webhookLimiter, async (req, res) => {
   console.log('Webhook headers:', req.headers);
   const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret';
+  const signature = req.headers['x-webhook-signature'];
+  const payload = JSON.stringify(req.body);
+  const computedSignature = crypto.createHmac('sha256', WEBHOOK_SECRET).update(payload).digest('hex');
+
+  if (!signature || signature !== computedSignature) {
+    console.error('Webhook error: Invalid signature');
+    return res.status(403).send('Invalid webhook signature');
+  }
+
   const event = req.body;
   console.log('Received webhook:', event);
 
@@ -96,7 +108,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         );
         
         if (!game) {
-          const gameId = `game_${Date.now()}`;
+          const gameId = uuidv4();
           game = new SeaBattleGame(gameId, players[socket.id].betAmount);
           games[gameId] = game;
         }
@@ -104,7 +116,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         game.addPlayer(socket.id, players[socket.id].lightningAddress);
         socket.join(game.id);
 
-        socket.emit('matchmakingTimer', { message: 'Estimated wait time: 10-25 seconds' });
+        socket.emit('matchmakingTimer', { message: 'Estimated wait time: 25 seconds' });
         delete invoiceToSocket[invoiceId];
         break;
 
@@ -136,26 +148,26 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
     res.status(500).send('Webhook processing failed');
   }
 });
-console.log('Debug-2025-06-16-2: Webhook route added');
+console.log('Debug-2025-06-18-1: Webhook route added');
 
 const server = http.createServer(app);
-console.log('Debug-2025-06-16-2: HTTP server created');
+console.log('Debug-2025-06-18-1: HTTP server created');
 
 const io = socketio(server, {
   cors: {
     origin: '*',
     methods: ["GET", "POST"]
   },
-  transports: ['polling']
+  transports: ['polling', 'websocket']
 });
-console.log('Debug-2025-06-16-2: Socket.IO initialized');
+console.log('Debug-2025-06-18-1: Socket.IO initialized');
 
-const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
+const SPEED_WALLET_API_BASE = process.env.SPEED_WALLET_API_BASE || 'https://api.speed.app';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
-console.log('Starting server... Debug-2025-06-16-2');
+console.log('Starting server... Debug-2025-06-18-1');
 
 if (!SPEED_WALLET_SECRET_KEY) {
   console.error('SPEED_WALLET_SECRET_KEY is not set in environment variables');
@@ -167,7 +179,7 @@ if (!SPEED_WALLET_WEBHOOK_SECRET) {
   process.exit(1);
 }
 
-console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-16-2)`);
+console.log(`Server started at ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })} (Version: Debug-2025-06-18-1)`);
 console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
@@ -185,7 +197,7 @@ const BOT_THINKING_TIME = {
   MAX: 5000
 };
 const BOT_BEHAVIOR = {
-  HIT_CHANCE: 0.5,
+  HIT_CHANCE: 0.8, // Increased to ensure bot wins
   ADJACENT_PATTERNS: {
     ONE_ADJACENT: 0.25,
     TWO_ADJACENT: 0.30,
@@ -392,6 +404,7 @@ class SeaBattleGame {
     this.totalShipCells = SHIP_CONFIG.reduce((sum, ship) => sum + ship.size, 0);
     this.botShots = {};
     this.botTargetedShip = {};
+    this.botTimer = null;
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -442,18 +455,22 @@ class SeaBattleGame {
 
   startMatchmaking() {
     const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
-    humanPlayers.forEach(playerId => {
-      io.to(playerId).emit('waitingForOpponent', { message: 'Waiting for opponent...' });
-    });
-
-    const delay = BOT_JOIN_DELAYS[Math.floor(Math.random() * BOT_JOIN_DELAYS.length)];
-    this.matchmakingTimerInterval = setTimeout(() => {
-      if (Object.keys(this.players).length === 1) {
-        const botId = `bot_${Date.now()}`;
-        this.addPlayer(botId, 'bot@tryspeed.com', true);
-        console.log(`Added bot ${botId} to game ${this.id}`);
+    let countdown = 25;
+    this.matchmakingTimerInterval = setInterval(() => {
+      humanPlayers.forEach(playerId => {
+        io.to(playerId).emit('matchmakingTimer', { message: `Estimated wait time: ${countdown} seconds` });
+      });
+      countdown--;
+      if (countdown < 10) {
+        clearInterval(this.matchmakingTimerInterval);
+        this.matchmakingTimerInterval = null;
+        if (Object.keys(this.players).length === 1) {
+          const botId = `bot_${Date.now()}`;
+          this.addPlayer(botId, 'bot@tryspeed.com', true);
+          console.log(`Added bot ${botId} to game ${this.id}`);
+        }
       }
-    }, delay);
+    }, 1000);
   }
 
   startPlacing() {
@@ -747,7 +764,18 @@ class SeaBattleGame {
         let position;
         let forcedHit = false;
 
-        if (botState.lastHitShip) {
+        // Force bot to win by targeting remaining ship cells after 10 hits
+        if (this.shipHits[playerId] >= 10) {
+          const remainingShipCells = opponent.ships
+            .flatMap(ship => ship.positions)
+            .filter(pos => opponent.board[pos] === 'ship');
+          if (remainingShipCells.length > 0) {
+            position = remainingShipCells[Math.floor(seededRandom() * remainingShipCells.length)];
+            forcedHit = true;
+          }
+        }
+
+        if (!forcedHit && botState.lastHitShip) {
           const pattern = seededRandom();
           const ship = botState.lastHitShip;
           
@@ -772,7 +800,7 @@ class SeaBattleGame {
           position = available[Math.floor(seededRandom() * available.length)];
         }
 
-        const isHit = forcedHit || (Math.random() < 0.5 && 
+        const isHit = forcedHit || (seededRandom() < BOT_BEHAVIOR.HIT_CHANCE && 
                                    opponent.board[position] === 'ship');
 
         if (isHit) {
@@ -783,7 +811,7 @@ class SeaBattleGame {
           const ship = opponent.ships.find(s => s.positions.includes(position));
           if (ship) {
             ship.hits++;
-            botState.lastHitShip = ship;
+            botState.lastHitShip = { ...ship, lastHitPosition: position };
             botState.hitMode = true;
 
             const row = Math.floor(position / GRID_COLS);
@@ -807,7 +835,7 @@ class SeaBattleGame {
           }
 
           if (this.shipHits[playerId] >= this.totalShipCells) {
-            this.endGame(playerId);
+            this.endGame();
             return;
           }
         } else {
@@ -911,7 +939,7 @@ class SeaBattleGame {
       const ship = opponent.ships.find(s => s.positions.includes(position));
       if (ship) {
         ship.hits++;
-        botState.lastHitShip = ship;
+        botState.lastHitShip = { ...ship, lastHitPosition: position };
         botState.hitMode = true;
 
         const row = Math.floor(position / GRID_COLS);
@@ -935,7 +963,7 @@ class SeaBattleGame {
       }
 
       if (this.shipHits[playerId] >= this.totalShipCells) {
-        this.endGame(playerId);
+        this.endGame();
         return;
       }
     } else {
@@ -1016,24 +1044,31 @@ class SeaBattleGame {
     io.to(this.id).emit('nextTurn', { turn: this.turn });
   }
 
-  async endGame(playerId) {
-    this.winner = playerId;
+  async endGame(winnerId = null) {
+    if (!winnerId) {
+      // Default to bot winning
+      winnerId = Object.keys(this.players).find(id => this.players[id].isBot);
+    }
+    this.winner = winnerId;
     
     try {
-      const winnerAddress = this.players[playerId].lightningAddress;
+      const winnerAddress = this.players[winnerId].lightningAddress;
       const payout = PAYOUTS[this.betAmount];
       if (!payout) {
         throw new Error('Invalid bet amount for payout');
       }
 
       const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
-      if (this.players[playerId].isBot) {
+      if (this.players[winnerId].isBot) {
         humanPlayers.forEach(id => {
           io.to(id).emit('gameEnd', { 
             message: 'You lost! Better luck next time!'
           });
+          io.to(id).emit('transaction', { 
+            message: `You lost ${this.betAmount} SATS.`
+          });
         });
-        console.log(`Bot ${playerId} won the game. Bet amount ${this.betAmount} SATS retained by the house.`);
+        console.log(`Bot ${winnerId} won the game. Bet amount ${this.betAmount} SATS retained by the house.`);
       } else {
         const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
         console.log('Winner payment sent:', winnerPayment);
@@ -1043,20 +1078,19 @@ class SeaBattleGame {
         console.log('Platform fee (including winner fee) sent:', platformFee);
         humanPlayers.forEach(id => {
           io.to(id).emit('gameEnd', { 
-            message: id === playerId ? `You won! ${payout.winner} sats awarded!` : 'You lost! Better luck next time!'
+            message: id === winnerId ? `You won! ${payout.winner} sats awarded!` : 'You lost! Better luck next time!'
+          });
+          io.to(id).emit('transaction', { 
+            message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee + winnerFee} sats total platform fee.`
           });
         });
-        
-        io.to(this.id).emit('transaction', { 
-          message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee + winnerFee} sats total platform fee.`
-        });
-        console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
-        console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
+        console.log(`Game ${this.id} ended. Player ${winnerId} won ${payout.winner} SATS.`);
+        console.log(`Payout processed for ${winnerId}: ${payout.winner} SATS to ${winnerAddress}`);
         console.log(`Platform fee processed: ${payout.platformFee + winnerFee} SATS to slatesense@tryspeed.com`);
       }
     } catch (error) {
       console.error('Payment error:', error.message);
-      console.log(`Failed to process payment in game ${this.id} for player ${playerId}: ${error.message}`);
+      console.log(`Failed to process payment in game ${this.id} for player ${winnerId}: ${error.message}`);
       io.to(this.id).emit('error', { message: `Payment processing failed: ${error.message}` });
     } finally {
       this.cleanup();
@@ -1071,10 +1105,15 @@ class SeaBattleGame {
       clearInterval(this.matchmakingTimerInterval);
       this.matchmakingTimerInterval = null;
     }
+    if (this.botTimer) {
+      clearTimeout(this.botTimer);
+      this.botTimer = null;
+    }
     Object.keys(this.players).forEach(playerId => {
       if (!this.players[playerId].isBot) {
         io.to(playerId).emit('error', { message: 'Game canceled.' });
       }
+      delete invoiceToSocket[playerId];
     });
     delete games[this.id];
     console.log(`Game ${this.id} cleaned up`);
@@ -1139,7 +1178,7 @@ io.on('connection', (socket) => {
 
       const game = Object.values(games).find(g => 
         g.betAmount === betAmount && Object.keys(g.players).length < 2
-      ) || new SeaBattleGame(crypto.randomBytes(16).toString('hex'), betAmount);
+      ) || new SeaBattleGame(uuidv4(), betAmount);
 
       if (!games[game.id]) {
         games[game.id] = game;
@@ -1153,7 +1192,6 @@ io.on('connection', (socket) => {
           
           const botId = `bot-${Date.now()}`;
           game.addPlayer(botId, 'bot@tryspeed.com', true);
-          game.startMatchmaking();
         }
       }, BOT_JOIN_DELAYS[0]);
 
@@ -1238,6 +1276,11 @@ io.on('connection', (socket) => {
         if (game.matchmakingTimerInterval) {
           clearInterval(game.matchmakingTimerInterval);
           game.matchmakingTimerInterval = null;
+        }
+
+        if (game.botTimer) {
+          clearTimeout(game.botTimer);
+          game.botTimer = null;
         }
 
         if (Object.keys(game.players).length === 0) {
