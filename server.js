@@ -759,9 +759,17 @@ class SeaBattleGame {
         let position;
         let forcedHit = false;
 
-        // If last hit exists, try adjacent
-        if (botState.lastHit !== null && botState.adjacentQueue && botState.adjacentQueue.length > 0) {
-          position = botState.adjacentQueue.shift();
+        // Find all remaining ship cells of the human player
+        const opponentShipCells = opponent.board
+          .map((cell, idx) => (cell === 'ship' ? idx : null))
+          .filter(idx => idx !== null && !botState.triedPositions.has(idx));
+
+        // If only 2 or fewer ship cells remain, always target them
+        if (opponentShipCells.length > 0 && opponentShipCells.length <= 2) {
+          // Always target a ship cell (guaranteed hit)
+          position = opponentShipCells[0];
+          // Optionally: add a little random delay to keep it human-like
+          // (already handled by thinkingTime)
         } else {
           // Random shot
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
