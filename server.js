@@ -745,98 +745,85 @@ class SeaBattleGame {
   }
 
   botFireShot(playerId) {
-    if (this.winner || playerId !== this.turn || !this.players[playerId].isBot) return;
+    try {
+      if (this.winner || playerId !== this.turn || !this.players[playerId].isBot) return;
 
-    const botState = this.botState[playerId] || this.initBotState(playerId);
-    const opponentId = Object.keys(this.players).find(id => id !== playerId);
-    const opponent = this.players[opponentId];
-    const seededRandom = this.randomGenerators[playerId];
+      const botState = this.botState[playerId] || this.initBotState(playerId);
+      const opponentId = Object.keys(this.players).find(id => id !== playerId);
+      const opponent = this.players[opponentId];
+      const seededRandom = this.randomGenerators[playerId];
 
-    // Add random thinking time
-    const thinkingTime = Math.floor(seededRandom() * 
-      (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN)) + BOT_THINKING_TIME.MIN;
+      const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN)) + BOT_THINKING_TIME.MIN;
 
-    setTimeout(() => {
-      let position;
-      const hitRoll = seededRandom();
-      let forcedHit = false;
+      setTimeout(() => {
+        let position;
+        let forcedHit = false;
 
-      // Bot targeting logic
-      if (botState.lastHitShip) {
-        // Bot is focused on sinking current ship
-        const pattern = seededRandom();
-        
-        // Apply adjacent targeting patterns
-        if (pattern < BOT_BEHAVIOR.ADJACENT_PATTERNS.ONE_ADJACENT) {
-          position = this.getAdjacentPosition(botState.lastHitPosition, 1, botState);
-        } else if (pattern < BOT_BEHAVIOR.ADJACENT_PATTERNS.ONE_ADJACENT + 
-                            BOT_BEHAVIOR.ADJACENT_PATTERNS.TWO_ADJACENT) {
-          position = this.getAdjacentPosition(botState.lastHitPosition, 2, botState);
-        } else if (pattern < BOT_BEHAVIOR.ADJACENT_PATTERNS.ONE_ADJACENT + 
-                            BOT_BEHAVIOR.ADJACENT_PATTERNS.TWO_ADJACENT +
-                            BOT_BEHAVIOR.ADJACENT_PATTERNS.THREE_ADJACENT) {
-          position = this.getAdjacentPosition(botState.lastHitPosition, 3, botState);
+        // If last hit exists, try adjacent
+        if (botState.lastHit !== null && botState.adjacentQueue && botState.adjacentQueue.length > 0) {
+          position = botState.adjacentQueue.shift();
         } else {
-          // Instant sink pattern
-          position = this.getShipPosition(botState.lastHitShip);
-          forcedHit = true;
-        }
-      }
-
-      // If no specific target, choose random position
-      if (position === undefined) {
-        const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
-          .filter(pos => !botState.triedPositions.has(pos));
-        position = available[Math.floor(seededRandom() * available.length)];
-      }
-
-      // Determine hit or miss
-      const isHit = forcedHit || (hitRoll < BOT_BEHAVIOR.HIT_CHANCE && 
-                                 opponent.board[position] === 'ship');
-
-      if (isHit) {
-        opponent.board[position] = 'hit';
-        this.shipHits[playerId]++;
-        
-        const hitShip = opponent.ships.find(s => s.positions.includes(position));
-        if (hitShip) {
-          hitShip.hits++;
-          botState.lastHitShip = hitShip;
-          botState.lastHitPosition = position;
+          // Random shot
+          const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
+            .filter(pos => !botState.triedPositions.has(pos));
+          position = available[Math.floor(seededRandom() * available.length)];
         }
 
-        // Check for game win
-        if (this.shipHits[playerId] >= this.totalShipCells) {
-          this.endGame(playerId);
-          return;
+        if (position === undefined) {
+          // Fallback to any available
+          position = Array.from({ length: GRID_SIZE }, (_, i) => i)
+            .find(pos => !botState.triedPositions.has(pos));
         }
-      } else {
-        opponent.board[position] = 'miss';
-      }
 
-      botState.triedPositions.add(position);
+        const isHit = opponent.board[position] === 'ship';
 
-      // Emit result to players
-      io.to(this.id).emit('fireResult', {
-        player: playerId,
-        position,
-        hit: isHit
-      });
+        if (isHit) {
+          opponent.board[position] = 'hit';
+          this.shipHits[playerId]++;
+          botState.lastHit = position;
 
-      // Handle turn change
-      if (!isHit) {
-        this.turn = opponentId;
-        if (this.players[this.turn].isBot) {
-          setTimeout(() => this.botFireShot(this.turn), 
+          // Update adjacent queue
+          const row = Math.floor(position / GRID_COLS);
+          const col = position % GRID_COLS;
+          const adjacentPositions = [];
+          if (row > 0) adjacentPositions.push(position - GRID_COLS);
+          if (row < GRID_ROWS - 1) adjacentPositions.push(position + GRID_COLS);
+          if (col > 0) adjacentPositions.push(position - 1);
+          if (col < GRID_COLS - 1) adjacentPositions.push(position + 1);
+
+          botState.adjacentQueue = adjacentPositions.filter(pos =>
+            pos >= 0 && pos < GRID_SIZE && !botState.triedPositions.has(pos)
+          );
+        } else {
+          opponent.board[position] = 'miss';
+        }
+
+        botState.triedPositions.add(position);
+
+        // Emit result to players
+        io.to(opponentId).emit('fireResult', {
+          player: playerId,
+          position,
+          hit: isHit
+        });
+
+        // Handle turn change
+        if (!isHit) {
+          this.turn = opponentId;
+          if (this.players[this.turn].isBot) {
+            setTimeout(() => this.botFireShot(this.turn),
+              Math.floor(seededRandom() * 1000) + 1000);
+          }
+        } else {
+          setTimeout(() => this.botFireShot(playerId),
             Math.floor(seededRandom() * 1000) + 1000);
         }
-      } else {
-        setTimeout(() => this.botFireShot(playerId), 
-          Math.floor(seededRandom() * 1000) + 1000);
-      }
 
-      io.to(this.id).emit('nextTurn', { turn: this.turn });
-    }, thinkingTime);
+        io.to(this.id).emit('nextTurn', { turn: this.turn });
+      }, thinkingTime);
+    } catch (error) {
+      console.error('Bot error:', error);
+    }
   }
 
   initBotState(playerId) {
