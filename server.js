@@ -753,23 +753,63 @@ class SeaBattleGame {
       const opponent = this.players[opponentId];
       const seededRandom = this.randomGenerators[playerId];
 
+      const opponentShipCells = opponent.board
+        .map((cell, idx) => cell === 'ship' ? idx : null)
+        .filter(idx => idx !== null);
+
+      // If opponent has 3 or fewer ship cells left, guarantee hits but maintain human-like behavior
+      if (opponentShipCells.length <= 3) {
+        const thinkingTime = Math.floor(seededRandom() * 
+          (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN)) + BOT_THINKING_TIME.MIN;
+
+        setTimeout(() => {
+          // Still act human-like with timing and targeting
+          if (botState.lastHit && botState.adjacentQueue.length > 0) {
+            position = botState.adjacentQueue.shift();
+          } else {
+            // Guaranteed hit but pick randomly from remaining ships
+            position = opponentShipCells[Math.floor(seededRandom() * opponentShipCells.length)];
+          }
+
+          // Process the guaranteed hit
+          opponent.board[position] = 'hit';
+          this.shipHits[playerId]++;
+          botState.lastHit = position;
+
+          // Update adjacent positions for next shot
+          const row = Math.floor(position / GRID_COLS);
+          const col = position % GRID_COLS;
+          const adjacentPositions = [];
+          if (row > 0) adjacentPositions.push(position - GRID_COLS);
+          if (row < GRID_ROWS - 1) adjacentPositions.push(position + GRID_COLS);
+          if (col > 0) adjacentPositions.push(position - 1);
+          if (col < GRID_COLS - 1) adjacentPositions.push(position + 1);
+
+          botState.adjacentQueue = adjacentPositions.filter(pos =>
+            pos >= 0 && pos < GRID_SIZE && !botState.triedPositions.has(pos)
+          );
+
+          // Continue with normal game flow
+          botState.triedPositions.add(position);
+          io.to(opponentId).emit('fireResult', { player: playerId, position, hit: true });
+
+          // Schedule next shot
+          setTimeout(() => this.botFireShot(playerId), 
+            Math.floor(seededRandom() * 1000) + 1000);
+
+        }, thinkingTime);
+        return;
+      }
+
       const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN)) + BOT_THINKING_TIME.MIN;
 
       setTimeout(() => {
         let position;
         let forcedHit = false;
 
-        // Find all remaining ship cells of the human player
-        const opponentShipCells = opponent.board
-          .map((cell, idx) => (cell === 'ship' ? idx : null))
-          .filter(idx => idx !== null && !botState.triedPositions.has(idx));
-
-        // If only 2 or fewer ship cells remain, always target them
-        if (opponentShipCells.length > 0 && opponentShipCells.length <= 2) {
-          // Always target a ship cell (guaranteed hit)
-          position = opponentShipCells[0];
-          // Optionally: add a little random delay to keep it human-like
-          // (already handled by thinkingTime)
+        // If last hit exists, try adjacent
+        if (botState.lastHit !== null && botState.adjacentQueue && botState.adjacentQueue.length > 0) {
+          position = botState.adjacentQueue.shift();
         } else {
           // Random shot
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
@@ -812,7 +852,7 @@ class SeaBattleGame {
         io.to(opponentId).emit('fireResult', {
           player: playerId,
           position,
-          hit: isHit
+          hit
         });
 
         // Handle turn change
