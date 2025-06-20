@@ -415,8 +415,7 @@ class SeaBattleGame {
         lastHit: null,
         adjacentQueue: [],
         triedPositions: new Set(),
-        hitMode: false,
-        currentTarget: null // { shipPositions: [], orientation: null, hits: [] }
+        hitMode: false
       };
       this.botShots[playerId] = new Set();
       this.botTargetedShip[playerId] = null;
@@ -620,10 +619,17 @@ class SeaBattleGame {
   }
 
   placeShips(playerId, placements) {
+    // Add this check at the start
     if (!placements || !Array.isArray(placements)) {
       throw new Error('Invalid placements data');
     }
 
+    // Add size validation
+    const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
+    if (!matchingConfig || ship.positions.length !== matchingConfig.size) {
+      throw new Error(`Invalid ship size for ${ship.name}`);
+    }
+    
     const player = this.players[playerId];
     if (player.isBot) return;
     
@@ -637,13 +643,6 @@ class SeaBattleGame {
     }
 
     for (const ship of placements) {
-      // ---- Move this validation here ----
-      const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
-      if (!matchingConfig || ship.positions.length !== matchingConfig.size) {
-        throw new Error(`Invalid ship size for ${ship.name}`);
-      }
-      // ---- End move ----
-
       if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== ship.size) {
         throw new Error(`Invalid ship positions for ${ship.name}`);
       }
@@ -795,77 +794,6 @@ class SeaBattleGame {
           botState.adjacentQueue = adjacentPositions.filter(pos =>
             pos >= 0 && pos < GRID_SIZE && !botState.triedPositions.has(pos)
           );
-
-          // Find the ship
-          const ship = opponent.ships.find(s => s.positions.includes(position));
-          if (ship) {
-            // Track hits on the current ship
-            if (!botState.currentTarget || !botState.currentTarget.shipPositions.includes(position)) {
-              botState.currentTarget = {
-                shipPositions: ship.positions,
-                hits: [position],
-                orientation: null
-              };
-            } else {
-              botState.currentTarget.hits.push(position);
-            }
-
-            // If two or more hits, deduce orientation
-            if (botState.currentTarget.hits.length >= 2 && !botState.currentTarget.orientation) {
-              const [first, second] = botState.currentTarget.hits;
-              botState.currentTarget.orientation = 
-                Math.abs(first - second) === 1 ? 'horizontal' : 'vertical';
-            }
-
-            // If orientation known, target along that direction
-            if (botState.currentTarget.orientation) {
-              const dir = botState.currentTarget.orientation === 'horizontal' ? 1 : GRID_COLS;
-              // Find min and max hit positions
-              const sortedHits = botState.currentTarget.hits.slice().sort((a, b) => a - b);
-              const before = sortedHits[0] - dir;
-              const after = sortedHits[sortedHits.length - 1] + dir;
-              let nextTarget = null;
-              if (
-                before >= 0 &&
-                before < GRID_SIZE &&
-                ship.positions.includes(before) &&
-                !botState.triedPositions.has(before)
-              ) {
-                nextTarget = before;
-              } else if (
-                after >= 0 &&
-                after < GRID_SIZE &&
-                ship.positions.includes(after) &&
-                !botState.triedPositions.has(after)
-              ) {
-                nextTarget = after;
-              }
-              if (nextTarget !== null) {
-                // Fire at nextTarget next turn
-                botState.adjacentQueue = [nextTarget];
-              } else if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
-                // Ship sunk, try next grid after the ship in the same direction
-                const nextGrid = after;
-                if (
-                  nextGrid >= 0 &&
-                  nextGrid < GRID_SIZE &&
-                  !botState.triedPositions.has(nextGrid)
-                ) {
-                  botState.adjacentQueue = [nextGrid];
-                } else {
-                  botState.currentTarget = null; // Reset targeting
-                }
-              }
-            } else {
-              // If orientation not known, keep trying adjacents as before
-              // (your existing adjacent logic)
-            }
-
-            // If ship is sunk, reset currentTarget
-            if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
-              botState.currentTarget = null;
-            }
-          }
         } else {
           opponent.board[position] = 'miss';
         }
