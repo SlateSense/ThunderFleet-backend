@@ -753,52 +753,103 @@ class SeaBattleGame {
       const opponent = this.players[opponentId];
       const seededRandom = this.randomGenerators[playerId];
 
+      // Always win if only 3 or fewer ship cells remain
+      const remainingShipCells = opponent.board
+        .map((cell, idx) => cell === 'ship' ? idx : null)
+        .filter(idx => idx !== null && !botState.triedPositions.has(idx));
+      if (remainingShipCells.length > 0 && remainingShipCells.length <= 3) {
+        this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
+        return;
+      }
+
       const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN)) + BOT_THINKING_TIME.MIN;
 
       setTimeout(() => {
-        let position;
-        let forcedHit = false;
+        // Multi-target support: botState.targets = [{hits: [], orientation: null, queue: []}, ...]
+        if (!botState.targets) botState.targets = [];
 
-        // If last hit exists, try adjacent
-        if (botState.lastHit !== null && botState.adjacentQueue && botState.adjacentQueue.length > 0) {
-          position = botState.adjacentQueue.shift();
-        } else {
-          // Random shot
+        // If we have any unfinished targets, focus on them first
+        let target = botState.targets.find(t => !t.sunk);
+        let position = null;
+
+        if (target) {
+          // If orientation is known, continue in that direction
+          if (target.orientation) {
+            position = this._botNextInLine(target, botState);
+          } else if (target.queue.length > 0) {
+            // Try next adjacent
+            position = target.queue.shift();
+          }
+        }
+
+        // If no active target, pick random and check for new hit
+        if (position === null) {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
           position = available[Math.floor(seededRandom() * available.length)];
         }
 
-        if (position === undefined) {
-          // Fallback to any available
-          position = Array.from({ length: GRID_SIZE }, (_, i) => i)
-            .find(pos => !botState.triedPositions.has(pos));
-        }
-
+        // Fire at position
         const isHit = opponent.board[position] === 'ship';
+        botState.triedPositions.add(position);
 
         if (isHit) {
           opponent.board[position] = 'hit';
           this.shipHits[playerId]++;
-          botState.lastHit = position;
 
-          // Update adjacent queue
-          const row = Math.floor(position / GRID_COLS);
-          const col = position % GRID_COLS;
-          const adjacentPositions = [];
-          if (row > 0) adjacentPositions.push(position - GRID_COLS);
-          if (row < GRID_ROWS - 1) adjacentPositions.push(position + GRID_COLS);
-          if (col > 0) adjacentPositions.push(position - 1);
-          if (col < GRID_COLS - 1) adjacentPositions.push(position + 1);
+          // Find which ship was hit
+          const ship = opponent.ships.find(s => s.positions.includes(position));
+          if (ship) {
+            // Find or create a target for this ship
+            let thisTarget = botState.targets.find(t => t.shipId === ship.name && !t.sunk);
+            if (!thisTarget) {
+              // New target
+              const adj = this._botAdjacents(position, botState);
+              thisTarget = {
+                shipId: ship.name,
+                hits: [position],
+                orientation: null,
+                queue: adj,
+                sunk: false
+              };
+              botState.targets.push(thisTarget);
+            } else {
+              // Existing target
+              thisTarget.hits.push(position);
+              // Remove from queue if present
+              thisTarget.queue = thisTarget.queue.filter(p => p !== position);
+            }
 
-          botState.adjacentQueue = adjacentPositions.filter(pos =>
-            pos >= 0 && pos < GRID_SIZE && !botState.triedPositions.has(pos)
-          );
-        } else {
-          opponent.board[position] = 'miss';
+            // Deduce orientation if 2+ hits
+            if (!thisTarget.orientation && thisTarget.hits.length >= 2) {
+              const [a, b] = thisTarget.hits;
+              thisTarget.orientation = (Math.abs(a - b) === 1) ? 'horizontal' : 'vertical';
+            }
+
+            // If ship is sunk, mark as sunk and try next grid in line
+            if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
+              thisTarget.sunk = true;
+              // Try next grid in line after the ship
+              if (thisTarget.orientation) {
+                const nextGrid = this._botNextAfterSunk(thisTarget, botState);
+                if (nextGrid !== null) {
+                  // Add as a new target (could be another ship)
+                  const adj = this._botAdjacents(nextGrid, botState);
+                  botState.targets.push({
+                    shipId: null, // unknown until hit
+                    hits: [],
+                    orientation: null,
+                    queue: [nextGrid, ...adj],
+                    sunk: false
+                  });
+                }
+              }
+            }
+          }
         }
 
-        botState.triedPositions.add(position);
+        // Remove finished targets
+        botState.targets = botState.targets.filter(t => !t.sunk || t.queue.length > 0);
 
         // Emit result to players
         io.to(opponentId).emit('fireResult', {
@@ -824,6 +875,65 @@ class SeaBattleGame {
     } catch (error) {
       console.error('Bot error:', error);
     }
+  }
+
+  // Helper: get adjacents for a position
+  _botAdjacents(position, botState) {
+    const adj = [];
+    const row = Math.floor(position / GRID_COLS);
+    const col = position % GRID_COLS;
+    if (row > 0) adj.push(position - GRID_COLS);
+    if (row < GRID_ROWS - 1) adj.push(position + GRID_COLS);
+    if (col > 0) adj.push(position - 1);
+    if (col < GRID_COLS - 1) adj.push(position + 1);
+    return adj.filter(pos => !botState.triedPositions.has(pos));
+  }
+
+  // Helper: continue in line if orientation is known
+  _botNextInLine(target, botState) {
+    const hits = target.hits.slice().sort((a, b) => a - b);
+    const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
+    const before = hits[0] - dir;
+    const after = hits[hits.length - 1] + dir;
+    if (!botState.triedPositions.has(before) && before >= 0 && before < GRID_SIZE) return before;
+    if (!botState.triedPositions.has(after) && after >= 0 && after < GRID_SIZE) return after;
+    // If both tried, fallback to any in queue
+    if (target.queue.length > 0) return target.queue.shift();
+    return null;
+  }
+
+  // Helper: after sinking, try next grid in line
+  _botNextAfterSunk(target, botState) {
+    const hits = target.hits.slice().sort((a, b) => a - b);
+    const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
+    const after = hits[hits.length - 1] + dir;
+    if (!botState.triedPositions.has(after) && after >= 0 && after < GRID_SIZE) return after;
+    return null;
+  }
+
+  // Helper: always win if 3 or fewer ship cells remain
+  _botTargetAndDestroy(playerId, opponentId, remainingShipCells) {
+    const botState = this.botState[playerId];
+    const opponent = this.players[opponentId];
+    const position = remainingShipCells[0];
+    opponent.board[position] = 'hit';
+    this.shipHits[playerId]++;
+    botState.triedPositions.add(position);
+
+    io.to(opponentId).emit('fireResult', {
+      player: playerId,
+      position,
+      hit: true
+    });
+
+    // Check for win
+    if (this.shipHits[playerId] >= this.totalShipCells) {
+      this.endGame(playerId);
+      return;
+    }
+
+    setTimeout(() => this.botFireShot(playerId), Math.floor(Math.random() * 1000) + 1000);
+    io.to(this.id).emit('nextTurn', { turn: this.turn });
   }
 
   initBotState(playerId) {
