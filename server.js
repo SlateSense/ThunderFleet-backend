@@ -619,19 +619,12 @@ class SeaBattleGame {
   }
 
   placeShips(playerId, placements) {
-    // Add this check at the start
     if (!placements || !Array.isArray(placements)) {
       throw new Error('Invalid placements data');
     }
 
-    // Add size validation
-    const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
-    if (!matchingConfig || ship.positions.length !== matchingConfig.size) {
-      throw new Error(`Invalid ship size for ${ship.name}`);
-    }
-    
     const player = this.players[playerId];
-    if (player.isBot) return;
+    if (!player || player.isBot) return;
     
     const gridSize = GRID_SIZE;
     const cols = GRID_COLS;
@@ -643,29 +636,16 @@ class SeaBattleGame {
     }
 
     for (const ship of placements) {
-      if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== ship.size) {
+      // Validate ship config and positions
+      const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
+      if (!matchingConfig) {
+        throw new Error(`Unknown ship: ${ship.name}`);
+      }
+      if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size) {
         throw new Error(`Invalid ship positions for ${ship.name}`);
       }
-      let startPos = ship.positions[0];
-      let row = Math.floor(startPos / cols);
-      let col = startPos % cols;
 
-      if (ship.horizontal) {
-        if (col < 0) col = 0;
-        if (col + ship.positions.length > cols) col = cols - ship.positions.length;
-        ship.positions = [];
-        for (let i = 0; i < ship.size; i++) {
-          ship.positions.push(row * cols + col + i);
-        }
-      } else {
-        if (row < 0) row = 0;
-        if (row + ship.positions.length > rows) row = rows - ship.positions.length;
-        ship.positions = [];
-        for (let i = 0; i < ship.size; i++) {
-          ship.positions.push((row + i) * cols + col);
-        }
-      }
-
+      // Check for overlap and bounds
       for (const pos of ship.positions) {
         if (pos < 0 || pos >= gridSize) {
           throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
@@ -677,9 +657,10 @@ class SeaBattleGame {
       }
     }
     
+    // If all checks pass, update player board and ships
     player.board = Array(GRID_SIZE).fill('water');
     player.ships = [];
-    
+
     placements.forEach(ship => {
       ship.positions.forEach(pos => {
         if (pos >= 0 && pos < gridSize) {
@@ -768,7 +749,7 @@ class SeaBattleGame {
         // Multi-target support: botState.targets = [{hits: [], orientation: null, queue: []}, ...]
         if (!botState.targets) botState.targets = [];
 
-        // If we have any unfinished targets, focus on them first
+        // Always focus on unfinished targets first
         let target = botState.targets.find(t => !t.sunk);
         let position = null;
 
@@ -848,7 +829,7 @@ class SeaBattleGame {
           }
         }
 
-        // Remove finished targets
+        // Remove finished targets with empty queue
         botState.targets = botState.targets.filter(t => !t.sunk || t.queue.length > 0);
 
         // Emit result to players
