@@ -734,16 +734,18 @@ class SeaBattleGame {
       const opponent = this.players[opponentId];
       const seededRandom = this.randomGenerators[playerId];
 
-      setTimeout(() => {
-        // Always win if only 3 or fewer ship cells remain (check every turn)
-        const remainingShipCells = opponent.board
-          .map((cell, idx) => cell === 'ship' ? idx : null)
-          .filter(idx => idx !== null && !botState.triedPositions.has(idx));
-        if (remainingShipCells.length > 0 && remainingShipCells.length <= 3) {
-          this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
-          return;
-        }
+      // Always win if only 3 or fewer ship cells remain
+      const remainingShipCells = opponent.board
+        .map((cell, idx) => cell === 'ship' ? idx : null)
+        .filter(idx => idx !== null && !botState.triedPositions.has(idx));
+      if (remainingShipCells.length > 0 && remainingShipCells.length <= 3) {
+        this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
+        return;
+      }
 
+      const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN)) + BOT_THINKING_TIME.MIN;
+
+      setTimeout(() => {
         // Multi-target support: botState.targets = [{hits: [], orientation: null, queue: []}, ...]
         if (!botState.targets) botState.targets = [];
 
