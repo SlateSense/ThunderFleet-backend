@@ -734,44 +734,39 @@ class SeaBattleGame {
       const opponent = this.players[opponentId];
       const seededRandom = this.randomGenerators[playerId];
 
-      setTimeout(() => {
-        // Always win if only 3 or fewer ship cells remain (check every turn)
-        const remainingShipCells = opponent.board
-          .map((cell, idx) => cell === 'ship' ? idx : null)
-          .filter(idx => idx !== null && !botState.triedPositions.has(idx));
-        if (remainingShipCells.length > 0 && remainingShipCells.length <= 3) {
-          this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
-          return;
-        }
+      // Always win if only 3 or fewer ship cells remain
+      const remainingShipCells = opponent.board
+        .map((cell, idx) => cell === 'ship' ? idx : null)
+        .filter(idx => idx !== null && !botState.triedPositions.has(idx));
+      if (remainingShipCells.length > 0 && remainingShipCells.length <= 3) {
+        this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
+        return;
+      }
 
+      const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN)) + BOT_THINKING_TIME.MIN;
+
+      setTimeout(() => {
+        // Multi-target support: botState.targets = [{hits: [], orientation: null, queue: []}, ...]
         if (!botState.targets) botState.targets = [];
 
-        // Always focus on unfinished targets first (in order found)
-        let unfinishedTargets = botState.targets.filter(t => !t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0)));
+        // Always focus on unfinished targets first
+        let target = botState.targets.find(t => !t.sunk);
         let position = null;
 
-        if (unfinishedTargets.length > 0) {
-          // Always finish the first unfinished target before firing randomly
-          let target = unfinishedTargets[0];
+        if (target) {
+          // If orientation is known, continue in that direction
           if (target.orientation) {
             position = this._botNextInLine(target, botState);
-          }
-          // If orientation didn't yield a position, try queue
-          if (position === null && target.queue && target.queue.length > 0) {
+          } else if (target.queue.length > 0) {
+            // Try next adjacent
             position = target.queue.shift();
           }
         }
 
-        // Only if ALL targets are finished or invalid, pick random
+        // If no active target, pick random and check for new hit
         if (position === null) {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
-          if (available.length === 0) {
-            // No moves left, end turn to avoid infinite "thinking"
-            this.turn = opponentId;
-            io.to(this.id).emit('nextTurn', { turn: this.turn });
-            return;
-          }
           position = available[Math.floor(seededRandom() * available.length)];
         }
 
@@ -818,41 +813,24 @@ class SeaBattleGame {
               // Try next grid in line after the ship
               if (thisTarget.orientation) {
                 const nextGrid = this._botNextAfterSunk(thisTarget, botState);
-                if (
-                  nextGrid !== null &&
-                  !botState.triedPositions.has(nextGrid) &&
-                  nextGrid >= 0 && nextGrid < GRID_SIZE
-                ) {
-                  // If the next grid is a ship, immediately focus on it
-                  if (opponent.board[nextGrid] === 'ship') {
-                    const adj = this._botAdjacents(nextGrid, botState);
-                    botState.targets.unshift({
-                      shipId: null, // will be set on hit
-                      hits: [],
-                      orientation: null,
-                      queue: [nextGrid, ...adj],
-                      sunk: false
-                    });
-                  } else {
-                    // If not a ship, just fire at it next turn (as a single-cell target)
-                    botState.targets.push({
-                      shipId: null,
-                      hits: [],
-                      orientation: null,
-                      queue: [nextGrid],
-                      sunk: false
-                    });
-                  }
+                if (nextGrid !== null) {
+                  // Add as a new target (could be another ship)
+                  const adj = this._botAdjacents(nextGrid, botState);
+                  botState.targets.push({
+                    shipId: null, // unknown until hit
+                    hits: [],
+                    orientation: null,
+                    queue: [nextGrid, ...adj],
+                    sunk: false
+                  });
                 }
               }
             }
           }
         }
 
-        // Remove finished targets with empty queue or no more hits
-        botState.targets = botState.targets.filter(
-          t => (!t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0)))
-        );
+        // Remove finished targets with empty queue
+        botState.targets = botState.targets.filter(t => !t.sunk || t.queue.length > 0);
 
         // Emit result to players
         io.to(opponentId).emit('fireResult', {
