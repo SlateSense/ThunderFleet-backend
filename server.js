@@ -750,20 +750,20 @@ class SeaBattleGame {
         if (!botState.targets) botState.targets = [];
 
         // Always focus on unfinished targets first
-        let target = botState.targets.find(t => !t.sunk);
+        let unfinishedTargets = botState.targets ? botState.targets.filter(t => !t.sunk) : [];
         let position = null;
 
-        if (target) {
-          // If orientation is known, continue in that direction
+        if (unfinishedTargets.length > 0) {
+          // Always finish the first unfinished target before firing randomly
+          let target = unfinishedTargets[0];
           if (target.orientation) {
             position = this._botNextInLine(target, botState);
           } else if (target.queue.length > 0) {
-            // Try next adjacent
             position = target.queue.shift();
           }
         }
 
-        // If no active target, pick random and check for new hit
+        // Only if ALL targets are finished, pick random
         if (position === null) {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
@@ -813,16 +813,32 @@ class SeaBattleGame {
               // Try next grid in line after the ship
               if (thisTarget.orientation) {
                 const nextGrid = this._botNextAfterSunk(thisTarget, botState);
-                if (nextGrid !== null) {
-                  // Add as a new target (could be another ship)
-                  const adj = this._botAdjacents(nextGrid, botState);
-                  botState.targets.push({
-                    shipId: null, // unknown until hit
-                    hits: [],
-                    orientation: null,
-                    queue: [nextGrid, ...adj],
-                    sunk: false
-                  });
+                if (
+                  nextGrid !== null &&
+                  !botState.triedPositions.has(nextGrid) &&
+                  nextGrid >= 0 && nextGrid < GRID_SIZE
+                ) {
+                  // If the next grid is a ship, immediately focus on it
+                  if (opponent.board[nextGrid] === 'ship') {
+                    // Create a new target for this ship and focus on it
+                    const adj = this._botAdjacents(nextGrid, botState);
+                    botState.targets.push({
+                      shipId: null, // will be set on hit
+                      hits: [],
+                      orientation: null,
+                      queue: [nextGrid, ...adj],
+                      sunk: false
+                    });
+                  } else {
+                    // If not a ship, just fire at it next turn (as a single-cell target)
+                    botState.targets.push({
+                      shipId: null,
+                      hits: [],
+                      orientation: null,
+                      queue: [nextGrid],
+                      sunk: false
+                    });
+                  }
                 }
               }
             }
