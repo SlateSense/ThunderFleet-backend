@@ -734,23 +734,20 @@ class SeaBattleGame {
       const opponent = this.players[opponentId];
       const seededRandom = this.randomGenerators[playerId];
 
-      // Always win if only 3 or fewer ship cells remain
-      const remainingShipCells = opponent.board
-        .map((cell, idx) => cell === 'ship' ? idx : null)
-        .filter(idx => idx !== null && !botState.triedPositions.has(idx));
-      if (remainingShipCells.length > 0 && remainingShipCells.length <= 3) {
-        this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
-        return;
-      }
-
-      const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN)) + BOT_THINKING_TIME.MIN;
-
       setTimeout(() => {
-        // Multi-target support: botState.targets = [{hits: [], orientation: null, queue: []}, ...]
+        // Always win if only 3 or fewer ship cells remain (check every turn)
+        const remainingShipCells = opponent.board
+          .map((cell, idx) => cell === 'ship' ? idx : null)
+          .filter(idx => idx !== null && !botState.triedPositions.has(idx));
+        if (remainingShipCells.length > 0 && remainingShipCells.length <= 3) {
+          this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
+          return;
+        }
+
         if (!botState.targets) botState.targets = [];
 
-        // Always focus on unfinished targets first
-        let unfinishedTargets = botState.targets ? botState.targets.filter(t => !t.sunk) : [];
+        // Always focus on unfinished targets first (in order found)
+        let unfinishedTargets = botState.targets.filter(t => !t.sunk);
         let position = null;
 
         if (unfinishedTargets.length > 0) {
@@ -820,9 +817,8 @@ class SeaBattleGame {
                 ) {
                   // If the next grid is a ship, immediately focus on it
                   if (opponent.board[nextGrid] === 'ship') {
-                    // Create a new target for this ship and focus on it
                     const adj = this._botAdjacents(nextGrid, botState);
-                    botState.targets.push({
+                    botState.targets.unshift({
                       shipId: null, // will be set on hit
                       hits: [],
                       orientation: null,
