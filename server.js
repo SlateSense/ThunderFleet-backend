@@ -1063,7 +1063,7 @@ class SeaBattleGame {
     }
     Object.keys(this.players).forEach(playerId => {
       if (!this.players[playerId].isBot) {
-        io.to(playerId).emit('error', { message: 'Opponent won, better luck next time...' }); // <-- FIXED MESSAGE
+        io.to(playerId).emit('error', { message: 'Game canceled.' });
       }
     });
     delete games[this.id];
