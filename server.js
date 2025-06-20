@@ -747,7 +747,7 @@ class SeaBattleGame {
         if (!botState.targets) botState.targets = [];
 
         // Always focus on unfinished targets first (in order found)
-        let unfinishedTargets = botState.targets.filter(t => !t.sunk);
+        let unfinishedTargets = botState.targets.filter(t => !t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0)));
         let position = null;
 
         if (unfinishedTargets.length > 0) {
@@ -755,15 +755,23 @@ class SeaBattleGame {
           let target = unfinishedTargets[0];
           if (target.orientation) {
             position = this._botNextInLine(target, botState);
-          } else if (target.queue.length > 0) {
+          }
+          // If orientation didn't yield a position, try queue
+          if (position === null && target.queue && target.queue.length > 0) {
             position = target.queue.shift();
           }
         }
 
-        // Only if ALL targets are finished, pick random
+        // Only if ALL targets are finished or invalid, pick random
         if (position === null) {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
+          if (available.length === 0) {
+            // No moves left, end turn to avoid infinite "thinking"
+            this.turn = opponentId;
+            io.to(this.id).emit('nextTurn', { turn: this.turn });
+            return;
+          }
           position = available[Math.floor(seededRandom() * available.length)];
         }
 
@@ -841,8 +849,10 @@ class SeaBattleGame {
           }
         }
 
-        // Remove finished targets with empty queue
-        botState.targets = botState.targets.filter(t => !t.sunk || t.queue.length > 0);
+        // Remove finished targets with empty queue or no more hits
+        botState.targets = botState.targets.filter(
+          t => (!t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0)))
+        );
 
         // Emit result to players
         io.to(opponentId).emit('fireResult', {
