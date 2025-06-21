@@ -146,10 +146,7 @@ const io = socketio(server, {
     origin: '*',
     methods: ["GET", "POST"]
   },
-  transports: ['polling', 'websocket'], // Added websocket as fallback
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000
+  transports: ['polling']
 });
 console.log('Debug-2025-06-16-2: Socket.IO initialized');
 
@@ -418,8 +415,7 @@ class SeaBattleGame {
         lastHit: null,
         adjacentQueue: [],
         triedPositions: new Set(),
-        hitMode: false,
-        targets: [] // Initialize targets array
+        hitMode: false
       };
       this.botShots[playerId] = new Set();
       this.botTargetedShip[playerId] = null;
@@ -495,9 +491,8 @@ class SeaBattleGame {
     SHIP_CONFIG.forEach(shipConfig => {
       let placed = false;
       let attempts = 0;
-      const maxAttempts = 200; // Increase attempts to ensure placement
       
-      while (!placed && attempts < maxAttempts) {
+      while (!placed && attempts < 100) {
         attempts++;
         const horizontal = seededRandom() > 0.5;
         const row = Math.floor(seededRandom() * rows);
@@ -528,31 +523,7 @@ class SeaBattleGame {
             hits: 0
           });
           placed = true;
-        } else if (attempts === maxAttempts - 1) {
-          // Fallback: Place ship in the first available space if all attempts fail
-          let fallbackPos = 0;
-          while (occupied.has(fallbackPos) && fallbackPos < gridSize) fallbackPos++;
-          if (fallbackPos < gridSize) {
-            positions.length = 0; // Clear invalid positions
-            for (let i = 0; i < shipConfig.size && fallbackPos + i < gridSize; i++) {
-              positions.push(fallbackPos + i);
-              occupied.add(fallbackPos + i);
-            }
-            if (positions.length === shipConfig.size) {
-              placements.push({
-                name: shipConfig.name,
-                positions,
-                horizontal: true, // Default to horizontal for fallback
-                sunk: false,
-                hits: 0
-              });
-              placed = true;
-            }
-          }
         }
-      }
-      if (!placed) {
-        console.warn(`Failed to place ${shipConfig.name} for player ${playerId} after ${maxAttempts} attempts`);
       }
     });
     
@@ -626,7 +597,6 @@ class SeaBattleGame {
       }
     });
 
-    player.ready = false; // Ensure player is unready after randomization
     io.to(playerId).emit('games', { 
       count: Object.values(this.players).filter(p => p.ready).length,
       grid: player.board,
@@ -869,9 +839,7 @@ class SeaBattleGame {
           }
 
           // Remove finished targets with empty queue
-          if (botState.targets) {
-            botState.targets = botState.targets.filter(t => !t.sunk || t.queue.length > 0);
-          }
+          botState.targets = botState.targets.filter(t => !t.sunk || t.queue.length > 0);
 
           // Emit result to players
           io.to(opponentId).emit('fireResult', {
@@ -949,7 +917,7 @@ class SeaBattleGame {
       hit: true
     });
 
-    // Only end the game if ALL ship cells are hit
+    // Check for win
     if (this.shipHits[playerId] >= this.totalShipCells) {
       this.endGame(playerId);
       return;
@@ -963,8 +931,7 @@ class SeaBattleGame {
     this.botState[playerId] = {
       triedPositions: new Set(),
       lastHitShip: null,
-      lastHitPosition: null,
-      targets: [] // Initialize targets array
+      lastHitPosition: null
     };
     return this.botState[playerId];
   }
@@ -1016,6 +983,11 @@ class SeaBattleGame {
           ship.sunk = true;
         }
       }
+      
+      if (this.shipHits[playerId] >= this.totalShipCells) {
+        this.endGame(playerId);
+        return;
+      }
     } else {
       opponent.board[position] = 'miss';
     }
@@ -1038,12 +1010,7 @@ class SeaBattleGame {
       this.turn = opponentId;
       if (this.players[this.turn].isBot) {
         const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
-        setTimeout(() => {
-          // Failsafe: Only fire if it's still the bot's turn and game not over
-          if (this.turn === opponentId && !this.winner) {
-            this.botFireShot(this.turn);
-          }
-        }, thinkingTime);
+        setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
     }
     io.to(this.id).emit('nextTurn', { turn: this.turn });
@@ -1112,20 +1079,6 @@ class SeaBattleGame {
     delete games[this.id];
     console.log(`Game ${this.id} cleaned up`);
   }
-
-  clearBoard(playerId) {
-    const player = this.players[playerId];
-    if (!player || player.ready || player.isBot) return;
-
-    player.board = Array(GRID_SIZE).fill('water');
-    player.ships = [];
-    player.ready = false;
-    io.to(playerId).emit('games', { 
-      count: Object.values(this.players).filter(p => p.ready).length,
-      grid: player.board,
-      ships: player.ships
-    });
-  }
 }
 
 io.on('connection', (socket) => {
@@ -1146,7 +1099,7 @@ io.on('connection', (socket) => {
 
       console.log(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${lightningAddress}`);
 
-      players[socket.id] = { lightningAddress, paid: false, betAmount, joinTime: Date.now() };
+      players[socket.id] = { lightningAddress, paid: false, betAmount };
 
       const customerId = 'cus_mbgcu49gfgNyffw9';
       const invoiceData = await createInvoice(
@@ -1269,25 +1222,6 @@ io.on('connection', (socket) => {
     }
   });
   
-  socket.on('clearBoard', ({ gameId, playerId }) => {
-    try {
-      const game = games[gameId];
-      if (game) {
-        game.clearBoard(playerId);
-        socket.emit('games', { 
-          count: Object.values(game.players).filter(p => p.ready).length,
-          grid: game.players[playerId].board,
-          ships: game.players[playerId].ships
-        });
-      } else {
-        throw new Error('Game not found');
-      }
-    } catch (error) {
-      console.error('Clear board error:', error.message);
-      socket.emit('error', { message: 'Failed to clear board: ' + error.message });
-    }
-  });
-  
   socket.on('disconnect', () => {
     console.log('Disconnected:', socket.id);
     Object.values(games).forEach(game => {
@@ -1331,70 +1265,6 @@ cron.schedule('*/5 * * * *', async () => {
 });
 
 const PORT = process.env.PORT || 4000;
-let cronJobRunning = false;
-
-const startCronJob = () => {
-  if (cronJobRunning) return;
-  console.log('Debug-2025-06-16-2: Starting cron job for matchmaking');
-  cronJobRunning = true;
-
-  cron.schedule('* * * * *', () => { // Every minute
-    console.log('Debug-2025-06-16-2: Running matchmaking cron job at', new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    const activeGames = Object.keys(games).filter(gameId => {
-      const game = games[gameId];
-      return Object.keys(game.players).length > 0;
-    });
-    if (activeGames.length > 0) {
-      activeGames.forEach(gameId => {
-        const game = games[gameId];
-        const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
-        const currentTime = new Date(now);
-        const currentHour = currentTime.getHours();
-        const currentMinute = currentTime.getMinutes();
-
-        if (Object.keys(game.players).length === 1) {
-          const playerId = Object.keys(game.players)[0];
-          const player = players[playerId];
-          if (player && !player.paid) {
-            io.to(playerId).emit('matchmakingTimer', {
-              message: `Waiting for opponent... ${currentHour}:${currentMinute < 10 ? '0' + currentMinute : currentMinute} IST`
-            });
-          } else if (player && player.paid) {
-            // --- PATCH START ---
-            // Remove timeout, just keep waiting
-            io.to(playerId).emit('waitingForOpponent', {
-              message: `Waiting for opponent...`
-            });
-            // --- PATCH END ---
-          }
-        } else if (Object.keys(game.players).length === 2) {
-          game.turn = Object.keys(game.players)[0];
-          Object.keys(game.players).forEach(playerId => {
-            if (!game.players[playerId].isBot) {
-              io.to(playerId).emit('startPlacing');
-            }
-          });
-          console.log(`[Server] Game ${gameId} started with players ${Object.keys(game.players).join(', ')}`);
-        }
-      });
-    }
-  }, {
-    scheduled: true,
-    timezone: 'Asia/Kolkata'
-  }).start();
-  console.log('Debug-2025-06-16-2: Cron job started');
-};
-
-const checkCronStatus = () => {
-  if (!cronJobRunning) {
-    console.log('Debug-2025-06-16-2: Cron job not running, restarting at', new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    startCronJob();
-  }
-};
-
-setInterval(checkCronStatus, 300000); // Check every 5 minutes
-
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
-  startCronJob();
 });
