@@ -146,7 +146,10 @@ const io = socketio(server, {
     origin: '*',
     methods: ["GET", "POST"]
   },
-  transports: ['polling']
+  transports: ['polling', 'websocket'], // Added websocket as fallback
+  reconnection: true,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1000
 });
 console.log('Debug-2025-06-16-2: Socket.IO initialized');
 
@@ -597,6 +600,7 @@ class SeaBattleGame {
       }
     });
 
+    player.ready = false; // Ensure player is unready after randomization
     io.to(playerId).emit('games', { 
       count: Object.values(this.players).filter(p => p.ready).length,
       grid: player.board,
@@ -1079,6 +1083,20 @@ class SeaBattleGame {
     delete games[this.id];
     console.log(`Game ${this.id} cleaned up`);
   }
+
+  clearBoard(playerId) {
+    const player = this.players[playerId];
+    if (!player || player.ready || player.isBot) return;
+
+    player.board = Array(GRID_SIZE).fill('water');
+    player.ships = [];
+    player.ready = false;
+    io.to(playerId).emit('games', { 
+      count: Object.values(this.players).filter(p => p.ready).length,
+      grid: player.board,
+      ships: player.ships
+    });
+  }
 }
 
 io.on('connection', (socket) => {
@@ -1222,6 +1240,25 @@ io.on('connection', (socket) => {
     }
   });
   
+  socket.on('clearBoard', ({ gameId, playerId }) => {
+    try {
+      const game = games[gameId];
+      if (game) {
+        game.clearBoard(playerId);
+        socket.emit('games', { 
+          count: Object.values(game.players).filter(p => p.ready).length,
+          grid: game.players[playerId].board,
+          ships: game.players[playerId].ships
+        });
+      } else {
+        throw new Error('Game not found');
+      }
+    } catch (error) {
+      console.error('Clear board error:', error.message);
+      socket.emit('error', { message: 'Failed to clear board: ' + error.message });
+    }
+  });
+  
   socket.on('disconnect', () => {
     console.log('Disconnected:', socket.id);
     Object.values(games).forEach(game => {
@@ -1265,6 +1302,66 @@ cron.schedule('*/5 * * * *', async () => {
 });
 
 const PORT = process.env.PORT || 4000;
+let cronJobRunning = false;
+
+const startCronJob = () => {
+  if (cronJobRunning) return;
+  console.log('Debug-2025-06-16-2: Starting cron job for matchmaking');
+  cronJobRunning = true;
+
+  cron.schedule('* * * * *', () => { // Every minute
+    console.log('Debug-2025-06-16-2: Running matchmaking cron job at', new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    Object.keys(games).forEach(gameId => {
+      const game = games[gameId];
+      const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+      const currentTime = new Date(now);
+      const currentHour = currentTime.getHours();
+      const currentMinute = currentTime.getMinutes();
+
+      if (Object.keys(game.players).length === 1) {
+        const playerId = Object.keys(game.players)[0];
+        const player = players[playerId];
+        if (player && !player.paid) {
+          io.to(playerId).emit('matchmakingTimer', {
+            message: `Waiting for opponent... ${currentHour}:${currentMinute < 10 ? '0' + currentMinute : currentMinute} IST`
+          });
+        } else if (player && player.paid) {
+          const elapsed = (Date.now() - player.joinTime) / 1000;
+          if (elapsed > 25) {
+            delete games[gameId];
+            delete players[playerId];
+            io.to(playerId).emit('error', { message: 'Matchmaking timed out after 25 seconds.' });
+          } else {
+            io.to(playerId).emit('waitingForOpponent', {
+              message: `Waiting for opponent... Estimated wait time: ${Math.ceil(25 - elapsed)} seconds`
+            });
+          }
+        }
+      } else if (Object.keys(game.players).length === 2) {
+        game.turn = Object.keys(game.players)[0];
+        game.players.forEach(playerId => {
+          io.to(playerId).emit('startPlacing');
+        });
+        console.log(`[Server] Game ${gameId} started with players ${Object.keys(game.players).join(', ')}`);
+      }
+    });
+  }, {
+    scheduled: true,
+    timezone: 'Asia/Kolkata'
+  }).start();
+  console.log('Debug-2025-06-16-2: Cron job started');
+};
+
+const checkCronStatus = () => {
+  if (!cronJobRunning) {
+    console.log('Debug-2025-06-16-2: Cron job not running, restarting at', new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    startCronJob();
+  }
+};
+
+setInterval(checkCronStatus, 300000); // Check every 5 minutes
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
+  startCronJob();
 });
