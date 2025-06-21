@@ -949,7 +949,7 @@ class SeaBattleGame {
       hit: true
     });
 
-    // Check for win
+    // Only end the game if ALL ship cells are hit
     if (this.shipHits[playerId] >= this.totalShipCells) {
       this.endGame(playerId);
       return;
@@ -1015,11 +1015,6 @@ class SeaBattleGame {
         if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
           ship.sunk = true;
         }
-      }
-      
-      if (this.shipHits[playerId] >= this.totalShipCells) {
-        this.endGame(playerId);
-        return;
       }
     } else {
       opponent.board[position] = 'miss';
