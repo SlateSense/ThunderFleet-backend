@@ -1311,11 +1311,11 @@ io.on('connection', (socket) => {
       game.players[socket.id].board = Array(GRID_SIZE).fill('water');
       game.players[socket.id].ships = [];
       game.players[socket.id].ready = false;
-            io.to(socket.id).emit('games', {
-              count: Object.values(game.players).filter(p => p.ready).length,
-              grid: game.players[socket.id].board,
-              ships: game.players[socket.id].ships
-            });
-          }
-        });
+      io.to(socket.id).emit('games', {
+        count: Object.values(game.players).filter(p => p.ready).length,
+        grid: game.players[socket.id].board,
+        ships: game.players[socket.id].ships
       });
+    }
+  });
+});
