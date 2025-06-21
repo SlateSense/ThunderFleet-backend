@@ -775,19 +775,14 @@ class SeaBattleGame {
 
           // 60% chance to hit a ship if any left, else miss
           const hitChance = 0.6;
-          if (availableShips.length > 0 && seededRandom() < hitChance) {
+          const smartChance = 0.1; // 10% of the time, bot "guesses" a ship
+          if (availableShips.length > 0 && seededRandom() < smartChance) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
-            isHit = true;
           } else {
-            // Miss: pick a water cell (or random if none left)
-            if (availableWater.length > 0) {
-              position = availableWater[Math.floor(seededRandom() * availableWater.length)];
-              isHit = false;
-            } else {
-              // Only ships left, must hit
-              position = availableShips[Math.floor(seededRandom() * availableShips.length)];
-              isHit = true;
-            }
+            // Human-like: pick a random untried cell, let the board decide hit/miss
+            position = available[Math.floor(seededRandom() * available.length)];
+            // Let the board decide if it's a hit or miss
+            isHit = opponent.board[position] === 'ship';
           }
         }
 
