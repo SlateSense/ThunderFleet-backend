@@ -418,7 +418,8 @@ class SeaBattleGame {
         lastHit: null,
         adjacentQueue: [],
         triedPositions: new Set(),
-        hitMode: false
+        hitMode: false,
+        targets: [] // Initialize targets array
       };
       this.botShots[playerId] = new Set();
       this.botTargetedShip[playerId] = null;
@@ -494,8 +495,9 @@ class SeaBattleGame {
     SHIP_CONFIG.forEach(shipConfig => {
       let placed = false;
       let attempts = 0;
+      const maxAttempts = 200; // Increase attempts to ensure placement
       
-      while (!placed && attempts < 100) {
+      while (!placed && attempts < maxAttempts) {
         attempts++;
         const horizontal = seededRandom() > 0.5;
         const row = Math.floor(seededRandom() * rows);
@@ -526,7 +528,31 @@ class SeaBattleGame {
             hits: 0
           });
           placed = true;
+        } else if (attempts === maxAttempts - 1) {
+          // Fallback: Place ship in the first available space if all attempts fail
+          let fallbackPos = 0;
+          while (occupied.has(fallbackPos) && fallbackPos < gridSize) fallbackPos++;
+          if (fallbackPos < gridSize) {
+            positions.length = 0; // Clear invalid positions
+            for (let i = 0; i < shipConfig.size && fallbackPos + i < gridSize; i++) {
+              positions.push(fallbackPos + i);
+              occupied.add(fallbackPos + i);
+            }
+            if (positions.length === shipConfig.size) {
+              placements.push({
+                name: shipConfig.name,
+                positions,
+                horizontal: true, // Default to horizontal for fallback
+                sunk: false,
+                hits: 0
+              });
+              placed = true;
+            }
+          }
         }
+      }
+      if (!placed) {
+        console.warn(`Failed to place ${shipConfig.name} for player ${playerId} after ${maxAttempts} attempts`);
       }
     });
     
@@ -843,7 +869,9 @@ class SeaBattleGame {
           }
 
           // Remove finished targets with empty queue
-          botState.targets = botState.targets.filter(t => !t.sunk || t.queue.length > 0);
+          if (botState.targets) {
+            botState.targets = botState.targets.filter(t => !t.sunk || t.queue.length > 0);
+          }
 
           // Emit result to players
           io.to(opponentId).emit('fireResult', {
@@ -935,7 +963,8 @@ class SeaBattleGame {
     this.botState[playerId] = {
       triedPositions: new Set(),
       lastHitShip: null,
-      lastHitPosition: null
+      lastHitPosition: null,
+      targets: [] // Initialize targets array
     };
     return this.botState[playerId];
   }
@@ -1117,7 +1146,7 @@ io.on('connection', (socket) => {
 
       console.log(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${lightningAddress}`);
 
-      players[socket.id] = { lightningAddress, paid: false, betAmount };
+      players[socket.id] = { lightningAddress, paid: false, betAmount, joinTime: Date.now() };
 
       const customerId = 'cus_mbgcu49gfgNyffw9';
       const invoiceData = await createInvoice(
@@ -1311,40 +1340,48 @@ const startCronJob = () => {
 
   cron.schedule('* * * * *', () => { // Every minute
     console.log('Debug-2025-06-16-2: Running matchmaking cron job at', new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    Object.keys(games).forEach(gameId => {
+    const activeGames = Object.keys(games).filter(gameId => {
       const game = games[gameId];
-      const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
-      const currentTime = new Date(now);
-      const currentHour = currentTime.getHours();
-      const currentMinute = currentTime.getMinutes();
-
-      if (Object.keys(game.players).length === 1) {
-        const playerId = Object.keys(game.players)[0];
-        const player = players[playerId];
-        if (player && !player.paid) {
-          io.to(playerId).emit('matchmakingTimer', {
-            message: `Waiting for opponent... ${currentHour}:${currentMinute < 10 ? '0' + currentMinute : currentMinute} IST`
-          });
-        } else if (player && player.paid) {
-          const elapsed = (Date.now() - player.joinTime) / 1000;
-          if (elapsed > 25) {
-            delete games[gameId];
-            delete players[playerId];
-            io.to(playerId).emit('error', { message: 'Matchmaking timed out after 25 seconds.' });
-          } else {
-            io.to(playerId).emit('waitingForOpponent', {
-              message: `Waiting for opponent... Estimated wait time: ${Math.ceil(25 - elapsed)} seconds`
-            });
-          }
-        }
-      } else if (Object.keys(game.players).length === 2) {
-        game.turn = Object.keys(game.players)[0];
-        game.players.forEach(playerId => {
-          io.to(playerId).emit('startPlacing');
-        });
-        console.log(`[Server] Game ${gameId} started with players ${Object.keys(game.players).join(', ')}`);
-      }
+      return Object.keys(game.players).length > 0;
     });
+    if (activeGames.length > 0) {
+      activeGames.forEach(gameId => {
+        const game = games[gameId];
+        const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+        const currentTime = new Date(now);
+        const currentHour = currentTime.getHours();
+        const currentMinute = currentTime.getMinutes();
+
+        if (Object.keys(game.players).length === 1) {
+          const playerId = Object.keys(game.players)[0];
+          const player = players[playerId];
+          if (player && !player.paid) {
+            io.to(playerId).emit('matchmakingTimer', {
+              message: `Waiting for opponent... ${currentHour}:${currentMinute < 10 ? '0' + currentMinute : currentMinute} IST`
+            });
+          } else if (player && player.paid) {
+            const elapsed = (Date.now() - player.joinTime) / 1000;
+            if (elapsed > 25) {
+              delete games[gameId];
+              delete players[playerId];
+              io.to(playerId).emit('error', { message: 'Matchmaking timed out after 25 seconds.' });
+            } else {
+              io.to(playerId).emit('waitingForOpponent', {
+                message: `Waiting for opponent... Estimated wait time: ${Math.ceil(25 - elapsed)} seconds`
+              });
+            }
+          }
+        } else if (Object.keys(game.players).length === 2) {
+          game.turn = Object.keys(game.players)[0];
+          Object.keys(game.players).forEach(playerId => {
+            if (!game.players[playerId].isBot) {
+              io.to(playerId).emit('startPlacing');
+            }
+          });
+          console.log(`[Server] Game ${gameId} started with players ${Object.keys(game.players).join(', ')}`);
+        }
+      });
+    }
   }, {
     scheduled: true,
     timezone: 'Asia/Kolkata'
