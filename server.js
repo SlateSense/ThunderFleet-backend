@@ -1038,7 +1038,12 @@ class SeaBattleGame {
       this.turn = opponentId;
       if (this.players[this.turn].isBot) {
         const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
-        setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+        setTimeout(() => {
+          // Failsafe: Only fire if it's still the bot's turn and game not over
+          if (this.turn === opponentId && !this.winner) {
+            this.botFireShot(this.turn);
+          }
+        }, thinkingTime);
       }
     }
     io.to(this.id).emit('nextTurn', { turn: this.turn });
