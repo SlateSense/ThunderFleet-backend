@@ -845,32 +845,45 @@ class SeaBattleGame {
             if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
               thisTarget.sunk = true;
               if (thisTarget.orientation) {
-                const nextGrid = this._botNextAfterSunk(thisTarget, botState);
+                // Pass opponent to _botNextAfterSunk for streak logic
+                let nextGrid = this._botNextAfterSunk(thisTarget, botState, opponent);
+                // Keep streaking as long as there are ships in line
+                while (
+                  nextGrid !== null &&
+                  !botState.triedPositions.has(nextGrid) &&
+                  nextGrid >= 0 && nextGrid < GRID_SIZE &&
+                  opponent.board[nextGrid] === 'ship'
+                ) {
+                  // Immediately focus on the next ship cell in line
+                  const adj = this._botAdjacents(nextGrid, botState);
+                  botState.targets.unshift({
+                    shipId: null,
+                    hits: [],
+                    orientation: thisTarget.orientation,
+                    queue: [nextGrid, ...adj],
+                    sunk: false
+                  });
+                  // Prepare for next streak
+                  // Create a fake target to keep streaking
+                  const fakeTarget = {
+                    hits: [nextGrid],
+                    orientation: thisTarget.orientation
+                  };
+                  nextGrid = this._botNextAfterSunk(fakeTarget, botState, opponent);
+                }
+                // If the next grid is not a ship but still untried, add as a single-cell target
                 if (
                   nextGrid !== null &&
                   !botState.triedPositions.has(nextGrid) &&
                   nextGrid >= 0 && nextGrid < GRID_SIZE
                 ) {
-                  // If the next grid is a ship, immediately focus on it
-                  if (opponent.board[nextGrid] === 'ship') {
-                    const adj = this._botAdjacents(nextGrid, botState);
-                    botState.targets.unshift({
-                      shipId: null,
-                      hits: [],
-                      orientation: null,
-                      queue: [nextGrid, ...adj],
-                      sunk: false
-                    });
-                  } else {
-                    // If not a ship, just fire at it next turn (as a single-cell target)
-                    botState.targets.push({
-                      shipId: null,
-                      hits: [],
-                      orientation: null,
-                      queue: [nextGrid],
-                      sunk: false
-                    });
-                  }
+                  botState.targets.push({
+                    shipId: null,
+                    hits: [],
+                    orientation: thisTarget.orientation,
+                    queue: [nextGrid],
+                    sunk: false
+                  });
                 }
               }
             }
@@ -946,11 +959,35 @@ class SeaBattleGame {
   }
 
   // Helper: after sinking, try next grid in line
-  _botNextAfterSunk(target, botState) {
+  _botNextAfterSunk(target, botState, opponent) {
+    // Try to continue in both directions after sinking a ship
     const hits = target.hits.slice().sort((a, b) => a - b);
     const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
-    const after = hits[hits.length - 1] + dir;
-    if (!botState.triedPositions.has(after) && after >= 0 && after < GRID_SIZE) return after;
+
+    // Forward direction
+    let forward = hits[hits.length - 1] + dir;
+    while (
+      forward >= 0 && forward < GRID_SIZE &&
+      !botState.triedPositions.has(forward) &&
+      opponent.board[forward] === 'ship'
+    ) {
+      return forward;
+    }
+
+    // Backward direction
+    let backward = hits[0] - dir;
+    while (
+      backward >= 0 && backward < GRID_SIZE &&
+      !botState.triedPositions.has(backward) &&
+      opponent.board[backward] === 'ship'
+    ) {
+      return backward;
+    }
+
+    // If neither, try the next in line (even if not a ship, for completeness)
+    if (!botState.triedPositions.has(forward) && forward >= 0 && forward < GRID_SIZE) return forward;
+    if (!botState.triedPositions.has(backward) && backward >= 0 && backward < GRID_SIZE) return backward;
+
     return null;
   }
 
