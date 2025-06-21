@@ -1355,16 +1355,12 @@ const startCronJob = () => {
               message: `Waiting for opponent... ${currentHour}:${currentMinute < 10 ? '0' + currentMinute : currentMinute} IST`
             });
           } else if (player && player.paid) {
-            const elapsed = (Date.now() - player.joinTime) / 1000;
-            if (elapsed > 25) {
-              delete games[gameId];
-              delete players[playerId];
-              io.to(playerId).emit('error', { message: 'Matchmaking timed out after 25 seconds.' });
-            } else {
-              io.to(playerId).emit('waitingForOpponent', {
-                message: `Waiting for opponent... Estimated wait time: ${Math.ceil(25 - elapsed)} seconds`
-              });
-            }
+            // --- PATCH START ---
+            // Remove timeout, just keep waiting
+            io.to(playerId).emit('waitingForOpponent', {
+              message: `Waiting for opponent...`
+            });
+            // --- PATCH END ---
           }
         } else if (Object.keys(game.players).length === 2) {
           game.turn = Object.keys(game.players)[0];
