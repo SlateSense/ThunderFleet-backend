@@ -146,7 +146,7 @@ const io = socketio(server, {
     origin: '*',
     methods: ["GET", "POST"]
   },
-  transports: ['polling']
+  transports: ['websocket', 'polling'] // <--- add 'websocket'
 });
 console.log('Debug-2025-06-16-2: Socket.IO initialized');
 
@@ -1252,6 +1252,21 @@ io.on('connection', (socket) => {
     });
     delete players[socket.id];
   });
+
+  socket.on('clearBoard', ({ gameId }) => {
+    const game = games[gameId];
+    if (game && game.players[socket.id] && !game.players[socket.id].isBot) {
+      // Reset player's board and ships
+      game.players[socket.id].board = Array(GRID_SIZE).fill('water');
+      game.players[socket.id].ships = [];
+      game.players[socket.id].ready = false;
+      io.to(socket.id).emit('games', {
+        count: Object.values(game.players).filter(p => p.ready).length,
+        grid: game.players[socket.id].board,
+        ships: []
+      });
+    }
+  });
 });
 
 cron.schedule('*/5 * * * *', async () => {
@@ -1267,4 +1282,11 @@ cron.schedule('*/5 * * * *', async () => {
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection:', reason);
 });
