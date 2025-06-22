@@ -763,14 +763,23 @@ class SeaBattleGame {
         let position = null;
         let isHit = false;
 
-        // Continue in the same direction after a hit
-        if (botState.lastHitPosition !== null && botState.currentDirection !== null) {
-          const directionOffset = botState.currentDirection === 'horizontal' ? 1 : GRID_COLS;
-          const nextPosition = botState.lastHitPosition + directionOffset;
-          if (nextPosition >= 0 && nextPosition < GRID_SIZE && !botState.triedPositions.has(nextPosition)) {
-            position = nextPosition;
-          } else {
-            botState.currentDirection = null; // Reset direction if no valid next position
+        // Continue in the same column after a hit
+        if (botState.lastHitPosition !== null && !botState.currentDirection) {
+          const col = botState.lastHitPosition % GRID_COLS;
+          const row = Math.floor(botState.lastHitPosition / GRID_COLS);
+          const above = botState.lastHitPosition - GRID_COLS;
+          const below = botState.lastHitPosition + GRID_COLS;
+
+          if (above >= 0 && !botState.triedPositions.has(above)) {
+            position = above;
+          } else if (below < GRID_SIZE && !botState.triedPositions.has(below)) {
+            position = below;
+          }
+          if (position !== null) {
+            isHit = opponent.board[position] === 'ship';
+            if (isHit) {
+              botState.currentDirection = 'vertical'; // Set direction to vertical for column-based targeting
+            }
           }
         }
 
@@ -875,6 +884,29 @@ class SeaBattleGame {
                     hits: [],
                     orientation: thisTarget.orientation,
                     queue: [nextInLine],
+                    sunk: false
+                  });
+                }
+                // After sinking, check adjacent grids on both sides
+                const col = position % GRID_COLS;
+                const row = Math.floor(position / GRID_COLS);
+                const left = position - 1;
+                const right = position + 1;
+                if (col > 0 && !botState.triedPositions.has(left)) {
+                  botState.targets.unshift({
+                    shipId: null,
+                    hits: [],
+                    orientation: 'horizontal',
+                    queue: [left],
+                    sunk: false
+                  });
+                }
+                if (col < GRID_COLS - 1 && !botState.triedPositions.has(right)) {
+                  botState.targets.unshift({
+                    shipId: null,
+                    hits: [],
+                    orientation: 'horizontal',
+                    queue: [right],
                     sunk: false
                   });
                 }
@@ -1142,8 +1174,9 @@ class SeaBattleGame {
 
 io.on('connection', (socket) => {
   console.log('New connection:', socket.id);
+  console.log('Client IP:', socket.handshake.address);
   socket.on('error', (error) => {
-    console.error('Socket error:', error);
+    console.error('Socket error for', socket.id, ':', error.message);
     socket.emit('error', { message: 'An error occurred. Please try again.' });
   });
   
