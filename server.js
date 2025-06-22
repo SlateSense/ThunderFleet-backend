@@ -558,71 +558,89 @@ class SeaBattleGame {
     const rows = GRID_ROWS;
     const occupied = new Set();
 
-    // Validate all placements before applying changes
-    for (const ship of placements) {
-      const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
-      if (!matchingConfig) {
-        throw new Error(`Unknown ship: ${ship.name}`);
-      }
-      if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size) {
-        throw new Error(`Invalid ship positions length for ${ship.name}. Expected ${matchingConfig.size}, got ${ship.positions.length}`);
+    try {
+      // Validate all placements
+      if (!placements || !Array.isArray(placements) || placements.length !== SHIP_CONFIG.length) {
+        throw new Error(`Invalid placements data. Expected ${SHIP_CONFIG.length} ships, got ${placements?.length || 0}`);
       }
 
-      // Check for valid positions and ensure no overlap or out-of-bounds
-      const isHorizontal = ship.horizontal !== undefined ? ship.horizontal : true; // Default to horizontal if undefined
-      for (let i = 0; i < ship.positions.length; i++) {
-        const pos = ship.positions[i];
-        if (pos < 0 || pos >= gridSize) {
-          throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
+      for (const ship of placements) {
+        const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
+        if (!matchingConfig) {
+          throw new Error(`Unknown ship: ${ship.name}`);
         }
-        const row = Math.floor(pos / cols);
-        const col = pos % cols;
-        if (isHorizontal && (i > 0 && col !== ship.positions[i - 1] % cols + 1)) {
-          throw new Error(`Invalid horizontal alignment for ${ship.name} at position ${pos}`);
+        if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size) {
+          console.error(`Invalid ship positions length for ${ship.name}. Expected ${matchingConfig.size}, got ${ship.positions?.length || 0}`);
+          throw new Error(`Invalid ship positions length for ${ship.name}. Expected ${matchingConfig.size}, got ${ship.positions?.length || 0}`);
         }
-        if (!isHorizontal && (i > 0 && row !== Math.floor(ship.positions[i - 1] / cols) + 1)) {
-          throw new Error(`Invalid vertical alignment for ${ship.name} at position ${pos}`);
-        }
-        if (occupied.has(pos)) {
-          throw new Error(`Position ${pos} already occupied for ${ship.name}`);
-        }
-        occupied.add(pos);
-      }
-    }
-    
-    // If all checks pass, update player board and ships
-    player.board = Array(GRID_SIZE).fill('water');
-    player.ships = [];
 
-    placements.forEach(ship => {
-      if (ship.positions && Array.isArray(ship.positions)) {
-        ship.positions.forEach(pos => {
-          if (pos >= 0 && pos < gridSize) {
-            player.board[pos] = 'ship';
+        const isHorizontal = ship.horizontal !== undefined ? ship.horizontal : true;
+        for (let i = 0; i < ship.positions.length; i++) {
+          const pos = ship.positions[i];
+          if (pos < 0 || pos >= gridSize) {
+            throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
           }
-        });
-        player.ships.push({
-          name: ship.name,
-          positions: ship.positions,
-          horizontal: ship.horizontal,
-          sunk: false,
-          hits: 0
-        });
+          const row = Math.floor(pos / cols);
+          const col = pos % cols;
+          if (isHorizontal && i > 0 && col !== ship.positions[i - 1] % cols + 1) {
+            throw new Error(`Invalid horizontal alignment for ${ship.name} at position ${pos}`);
+          }
+          if (!isHorizontal && i > 0 && row !== Math.floor(ship.positions[i - 1] / cols) + 1) {
+            throw new Error(`Invalid vertical alignment for ${ship.name} at position ${pos}`);
+          }
+          if (occupied.has(pos)) {
+            throw new Error(`Position ${pos} already occupied for ${ship.name}`);
+          }
+          occupied.add(pos);
+        }
       }
-    });
 
-    io.to(playerId).emit('games', { 
-      count: Object.values(this.players).filter(p => p.ready).length,
-      grid: player.board,
-      ships: player.ships
-    });
+      // If all checks pass, update player board and ships
+      player.board = Array(GRID_SIZE).fill('water');
+      player.ships = [];
 
-    const otherPlayers = Object.keys(this.players).filter(id => id !== playerId);
-    otherPlayers.forEach(id => {
-      io.to(id).emit('games', { 
-        count: Object.values(this.players).filter(p => p.ready).length
+      placements.forEach(ship => {
+        if (ship.positions && Array.isArray(ship.positions)) {
+          ship.positions.forEach(pos => {
+            if (pos >= 0 && pos < gridSize) {
+              player.board[pos] = 'ship';
+            }
+          });
+          player.ships.push({
+            name: ship.name,
+            positions: ship.positions,
+            horizontal: ship.horizontal,
+            sunk: false,
+            hits: 0
+          });
+        }
       });
-    });
+
+      io.to(playerId).emit('games', { 
+        count: Object.values(this.players).filter(p => p.ready).length,
+        grid: player.board,
+        ships: player.ships
+      });
+
+      const otherPlayers = Object.keys(this.players).filter(id => id !== playerId);
+      otherPlayers.forEach(id => {
+        io.to(id).emit('games', { 
+          count: Object.values(this.players).filter(p => p.ready).length
+        });
+      });
+    } catch (error) {
+      console.error('Update board error:', error.message);
+      // Fallback to auto-place ships if validation fails
+      this.autoPlaceShips(playerId);
+      player.ships = this.players[playerId].ships; // Sync ships after auto-placement
+      io.to(playerId).emit('games', { 
+        count: Object.values(this.players).filter(p => p.ready).length,
+        grid: player.board,
+        ships: player.ships
+      });
+      io.to(playerId).emit('error', { message: `Board update failed: ${error.message}. Auto-placed ships.` });
+      socket.emit('updateBoard', { success: false });
+    }
   }
 
   placeShips(playerId, placements) {
@@ -932,10 +950,11 @@ class SeaBattleGame {
         }
       }, thinkingTime);
     } catch (error) {
-      console.error('Bot error:', error);
+      console.error('Bot error:', error.message);
       const opponentId = Object.keys(this.players).find(id => id !== playerId);
       this.turn = opponentId;
       io.to(this.id).emit('nextTurn', { turn: this.turn });
+      io.to(this.id).emit('error', { message: `Bot error: ${error.message}. Continuing game.` });
       if (this.players[this.turn].isBot) {
         setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
@@ -1065,58 +1084,70 @@ class SeaBattleGame {
   }
 
   fireShot(playerId, position) {
-    if (this.winner || playerId !== this.turn || this.players[playerId].isBot) return;
-    
-    const opponentId = Object.keys(this.players).find(id => id !== playerId);
-    const opponent = this.players[opponentId];
-    const cell = opponent.board[position];
-    
-    let hit = false;
-    if (cell === 'ship') {
-      hit = true;
-      opponent.board[position] = 'hit';
-      this.shipHits[playerId]++;
+    try {
+      if (this.winner || playerId !== this.turn || this.players[playerId].isBot) return;
       
-      const ship = opponent.ships.find(s => s.positions.includes(position));
-      if (ship) {
-        ship.hits++;
-        if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
-          ship.sunk = true;
-          this.botSunkShips[opponentId] = (this.botSunkShips[opponentId] || 0) + 1;
-          this.humanSunkShips[playerId] = (this.humanSunkShips[playerId] || 0) + 1;
+      const opponentId = Object.keys(this.players).find(id => id !== playerId);
+      const opponent = this.players[opponentId];
+      const cell = opponent.board[position];
+      
+      let hit = false;
+      if (cell === 'ship') {
+        hit = true;
+        opponent.board[position] = 'hit';
+        this.shipHits[playerId]++;
+        
+        const ship = opponent.ships.find(s => s.positions.includes(position));
+        if (ship) {
+          ship.hits++;
+          if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
+            ship.sunk = true;
+            this.botSunkShips[opponentId] = (this.botSunkShips[opponentId] || 0) + 1;
+            this.humanSunkShips[playerId] = (this.humanSunkShips[playerId] || 0) + 1;
+          }
         }
+        
+        if (this.shipHits[playerId] >= this.totalShipCells) {
+          this.endGame(playerId);
+          return;
+        }
+      } else {
+        opponent.board[position] = 'miss';
       }
-      
-      if (this.shipHits[playerId] >= this.totalShipCells) {
-        this.endGame(playerId);
-        return;
-      }
-    } else {
-      opponent.board[position] = 'miss';
-    }
 
-    io.to(playerId).emit('fireResult', {
-      player: playerId,
-      position,
-      hit
-    });
-    
-    if (!opponent.isBot) {
-      io.to(opponentId).emit('fireResult', {
+      io.to(playerId).emit('fireResult', {
         player: playerId,
         position,
         hit
       });
-    }
-    
-    if (!hit) {
+      
+      if (!opponent.isBot) {
+        io.to(opponentId).emit('fireResult', {
+          player: playerId,
+          position,
+          hit
+        });
+      }
+      
+      if (!hit) {
+        this.turn = opponentId;
+        if (this.players[this.turn].isBot) {
+          const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
+          setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+        }
+      }
+      io.to(this.id).emit('nextTurn', { turn: this.turn });
+    } catch (error) {
+      console.error('Fire shot error:', error.message);
+      const opponentId = Object.keys(this.players).find(id => id !== playerId);
       this.turn = opponentId;
+      io.to(this.id).emit('nextTurn', { turn: this.turn });
+      io.to(this.id).emit('error', { message: `Fire shot error: ${error.message}. Continuing game.` });
       if (this.players[this.turn].isBot) {
         const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
         setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
     }
-    io.to(this.id).emit('nextTurn', { turn: this.turn });
   }
 
   async endGame(playerId) {
@@ -1188,7 +1219,6 @@ io.on('connection', (socket) => {
   console.log('New connection:', socket.id);
   socket.on('error', (error) => {
     console.error('Socket error:', error);
-    // Notify client of error
     socket.emit('error', { message: 'An error occurred. Please try again.' });
   });
   
@@ -1285,7 +1315,6 @@ io.on('connection', (socket) => {
       const game = games[gameId];
       if (game) {
         game.updateBoard(playerId, placements);
-        // Send success response to client
         socket.emit('updateBoard', { success: true });
       } else {
         throw new Error('Game not found');
@@ -1332,8 +1361,10 @@ io.on('connection', (socket) => {
         const opponentId = Object.keys(game.players).find(id => id !== socket.id);
         if (opponentId && !game.winner) {
           io.to(opponentId).emit('gameEnd', { 
-            message: 'Player disconnected'
+            message: 'Opponent disconnected. Game paused. Reconnect to resume.'
           });
+          // Store game state for reconnection
+          game.players[socket.id].disconnected = true;
         }
         delete game.players[socket.id];
         
@@ -1354,6 +1385,28 @@ io.on('connection', (socket) => {
       }
     });
     delete players[socket.id];
+  });
+
+  socket.on('reconnect', ({ gameId, playerId }) => {
+    console.log(`Reconnect attempt for player ${playerId} in game ${gameId}`);
+    const game = games[gameId];
+    if (game && game.players[playerId] && game.players[playerId].disconnected) {
+      game.players[playerId].disconnected = false;
+      game.addPlayer(playerId, game.players[playerId].lightningAddress, false);
+      io.to(playerId).emit('reconnected', { 
+        gameId: game.id,
+        turn: game.turn,
+        message: 'Reconnected successfully. Resume your game.'
+      });
+      const opponentId = Object.keys(game.players).find(id => id !== playerId);
+      if (opponentId) {
+        io.to(opponentId).emit('gameUpdate', { 
+          message: 'Opponent reconnected. Game resuming.'
+        });
+      }
+    } else {
+      socket.emit('error', { message: 'Unable to reconnect. Game not found or not disconnected.' });
+    }
   });
 
   socket.on('clearBoard', ({ gameId }) => {
