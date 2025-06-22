@@ -777,9 +777,12 @@ class SeaBattleGame {
           const availableWater = available.filter(pos => opponent.board[pos] !== 'ship');
 
           if (available.length === 0) {
-            // No moves left, just end turn
+            // No moves left, switch turn
             this.turn = opponentId;
             io.to(this.id).emit('nextTurn', { turn: this.turn });
+            if (this.players[this.turn].isBot) {
+              setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+            }
             return;
           }
 
@@ -791,13 +794,17 @@ class SeaBattleGame {
           } else {
             // Human-like: pick a random untried cell, let the board decide hit/miss
             position = available[Math.floor(seededRandom() * available.length)];
-            // Let the board decide if it's a hit or miss
             isHit = opponent.board[position] === 'ship';
           }
         }
 
         // 4. Fire at position
-        if (position === null) return; // failsafe
+        if (position === null) {
+          // Fallback to random available position if no valid target
+          const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
+            .filter(pos => !botState.triedPositions.has(pos));
+          position = available[Math.floor(seededRandom() * available.length)] || position;
+        }
 
         botState.triedPositions.add(position);
 
@@ -888,14 +895,19 @@ class SeaBattleGame {
           t => (!t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0)))
         );
 
-        // 7. Emit result to players
+        // 7. Emit result to players with explicit hit status
         io.to(opponentId).emit('fireResult', {
           player: playerId,
           position,
           hit: isHit
         });
+        io.to(this.id).emit('fireResult', {
+          player: playerId,
+          position,
+          hit: isHit
+        });
 
-        // 8. Handle turn change and never get stuck
+        // 8. Handle turn change and prevent stalling
         if (!isHit) {
           this.turn = opponentId;
           if (this.players[this.turn].isBot) {
@@ -903,11 +915,10 @@ class SeaBattleGame {
               if (this.turn === opponentId && !this.winner) {
                 this.botFireShot(this.turn);
               }
-            }, Math.floor(seededRandom() * 1000) + 1000);
+            }, thinkingTime);
           }
         } else {
-          setTimeout(() => this.botFireShot(playerId),
-            Math.floor(seededRandom() * 1000) + 1000);
+          setTimeout(() => this.botFireShot(playerId), thinkingTime);
         }
 
         io.to(this.id).emit('nextTurn', { turn: this.turn });
@@ -920,6 +931,13 @@ class SeaBattleGame {
       }, thinkingTime);
     } catch (error) {
       console.error('Bot error:', error);
+      // Fallback to switch turn if bot encounters an error
+      const opponentId = Object.keys(this.players).find(id => id !== playerId);
+      this.turn = opponentId;
+      io.to(this.id).emit('nextTurn', { turn: this.turn });
+      if (this.players[this.turn].isBot) {
+        setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+      }
     }
   }
 
