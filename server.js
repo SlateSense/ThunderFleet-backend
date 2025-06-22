@@ -187,7 +187,7 @@ const BOT_THINKING_TIME = {
 const BOT_BEHAVIOR = {
   HIT_CHANCE: 0.5,            // 50% chance to hit
   ADJACENT_PATTERNS: {
-    ONE_ADJACENT: 0.25,       // 25% chance
+    ONE_ADJACENT: 0,
     TWO_ADJACENT: 0.30,       // 30% chance
     THREE_ADJACENT: 0.20,     // 20% chance
     INSTANT_SINK: 0.25        // 25% chance
@@ -555,22 +555,23 @@ class SeaBattleGame {
     const occupied = new Set();
 
     for (const ship of placements) {
-      // Validate ship config and positions
       const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
       if (!matchingConfig) {
         throw new Error(`Unknown ship: ${ship.name}`);
       }
       if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size) {
-        throw new Error(`Invalid ship positions for ${ship.name}`);
+        // Instead of throwing, send a clear error and return
+        io.to(playerId).emit('error', { message: `Invalid ship positions for ${ship.name}` });
+        return;
       }
-
-      // Check for overlap and bounds
       for (const pos of ship.positions) {
         if (pos < 0 || pos >= gridSize) {
-          throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
+          io.to(playerId).emit('error', { message: `Position ${pos} out of bounds for ${ship.name}` });
+          return;
         }
         if (occupied.has(pos)) {
-          throw new Error(`Position ${pos} already occupied for ${ship.name}`);
+          io.to(playerId).emit('error', { message: `Position ${pos} already occupied for ${ship.name}` });
+          return;
         }
         occupied.add(pos);
       }
@@ -838,33 +839,20 @@ class SeaBattleGame {
             if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
               thisTarget.sunk = true;
               if (thisTarget.orientation) {
-                // Only check the next cell in line ONCE (streak logic)
                 const nextGrid = this._botNextAfterSunk(thisTarget, botState, opponent);
                 if (
                   nextGrid !== null &&
                   !botState.triedPositions.has(nextGrid) &&
                   nextGrid >= 0 && nextGrid < GRID_SIZE
                 ) {
-                  // If the next grid is a ship, immediately focus on it (continue streak)
-                  if (opponent.board[nextGrid] === 'ship') {
-                    const adj = this._botAdjacents(nextGrid, botState);
-                    botState.targets.unshift({
-                      shipId: null,
-                      hits: [],
-                      orientation: thisTarget.orientation,
-                      queue: [nextGrid, ...adj],
-                      sunk: false
-                    });
-                  } else {
-                    // If not a ship, just fire at it next turn (as a single-cell target)
-                    botState.targets.push({
-                      shipId: null,
-                      hits: [],
-                      orientation: thisTarget.orientation,
-                      queue: [nextGrid],
-                      sunk: false
-                    });
-                  }
+                  // Always add as highest priority, even if another target exists
+                  botState.targets.unshift({
+                    shipId: null,
+                    hits: [],
+                    orientation: thisTarget.orientation,
+                    queue: [nextGrid],
+                    sunk: false
+                  });
                 }
               }
             }
@@ -940,7 +928,6 @@ class SeaBattleGame {
 
   // Helper: after sinking, try next grid in line
   _botNextAfterSunk(target, botState, opponent) {
-    // Try to continue in both directions after sinking a ship
     const hits = target.hits.slice().sort((a, b) => a - b);
     const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
 
