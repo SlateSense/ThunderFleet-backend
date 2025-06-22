@@ -614,38 +614,39 @@ class SeaBattleGame {
 
   placeShips(playerId, placements) {
     if (!placements || !Array.isArray(placements)) {
-      throw new Error('Invalid placements data');
+      io.to(playerId).emit('error', { message: 'Invalid placements data' });
+      return;
     }
 
     const player = this.players[playerId];
     if (!player || player.isBot) return;
-    
+
     const gridSize = GRID_SIZE;
-    const cols = GRID_COLS;
-    const rows = GRID_ROWS;
     const occupied = new Set();
-    
+
     if (placements.length !== SHIP_CONFIG.length) {
-      throw new Error(`Not all ships placed. Expected ${SHIP_CONFIG.length}, got ${placements.length}`);
+      io.to(playerId).emit('error', { message: `Not all ships placed. Expected ${SHIP_CONFIG.length}, got ${placements.length}` });
+      return;
     }
 
     for (const ship of placements) {
-      // Validate ship config and positions
       const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
       if (!matchingConfig) {
-        throw new Error(`Unknown ship: ${ship.name}`);
+        io.to(playerId).emit('error', { message: `Unknown ship: ${ship.name}` });
+        return;
       }
       if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size) {
-        throw new Error(`Invalid ship positions for ${ship.name}`);
+        io.to(playerId).emit('error', { message: `Invalid ship positions for ${ship.name}` });
+        return;
       }
-
-      // Check for overlap and bounds
       for (const pos of ship.positions) {
         if (pos < 0 || pos >= gridSize) {
-          throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
+          io.to(playerId).emit('error', { message: `Position ${pos} out of bounds for ${ship.name}` });
+          return;
         }
         if (occupied.has(pos)) {
-          throw new Error(`Position ${pos} already occupied for ${ship.name}`);
+          io.to(playerId).emit('error', { message: `Position ${pos} already occupied for ${ship.name}` });
+          return;
         }
         occupied.add(pos);
       }
@@ -876,18 +877,13 @@ class SeaBattleGame {
         // 8. Handle turn change and never get stuck
         if (!isHit) {
           this.turn = opponentId;
-          if (this.players[this.turn].isBot) {
-            setTimeout(() => {
-              if (this.turn === opponentId && !this.winner) {
-                this.botFireShot(this.turn);
-              }
-            }, Math.floor(seededRandom() * 1000) + 1000);
+          io.to(this.id).emit('nextTurn', { turn: this.turn });
+          // Only call botFireShot if the next turn is a bot (for bot vs bot, rare)
+          if (this.players[this.turn].isBot && !this.winner) {
+            setTimeout(() => this.botFireShot(this.turn), Math.floor(seededRandom() * 1000) + 1000);
           }
-        } else {
-          setTimeout(() => this.botFireShot(playerId),
-            Math.floor(seededRandom() * 1000) + 1000);
+          return; // End bot's turn after a miss!
         }
-
         io.to(this.id).emit('nextTurn', { turn: this.turn });
 
         // 9. End game if all ship cells are hit
