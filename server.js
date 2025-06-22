@@ -554,70 +554,72 @@ class SeaBattleGame {
     const rows = GRID_ROWS;
     const occupied = new Set();
 
-    for (const ship of placements) {
-      const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
-      if (!matchingConfig) {
-        throw new Error(`Unknown ship: ${ship.name}`);
-      }
-      if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size || ship.positions.some(pos => pos < 0 || pos >= gridSize)) {
-        io.to(playerId).emit('error', { message: `Invalid ship positions for ${ship.name}` });
-        return;
-      }
-      for (let i = 0; i < ship.positions.length - 1; i++) {
-        const currentPos = ship.positions[i];
-        const nextPos = ship.positions[i + 1];
-        const rowDiff = Math.floor(nextPos / cols) - Math.floor(currentPos / cols);
-        const colDiff = nextPos % cols - currentPos % cols;
-        if ((Math.abs(rowDiff) > 1 || Math.abs(colDiff) > 1) || (rowDiff !== 0 && colDiff !== 0)) {
-          io.to(playerId).emit('error', { message: `Invalid ship positions for ${ship.name}: Positions must be adjacent` });
-          return;
+    try {
+      for (const ship of placements) {
+        const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
+        if (!matchingConfig) {
+          throw new Error(`Unknown ship: ${ship.name}`);
         }
-      }
-      for (const pos of ship.positions) {
-        if (pos < 0 || pos >= gridSize) {
-          io.to(playerId).emit('error', { message: `Position ${pos} out of bounds for ${ship.name}` });
-          return;
+        if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size || ship.positions.some(pos => pos < 0 || pos >= gridSize)) {
+          throw new Error(`Invalid ship positions for ${ship.name}`);
         }
-        if (occupied.has(pos)) {
-          io.to(playerId).emit('error', { message: `Position ${pos} already occupied for ${ship.name}` });
-          return;
-        }
-        occupied.add(pos);
-      }
-    }
-    
-    player.board = Array(GRID_SIZE).fill('water');
-    player.ships = [];
-
-    placements.forEach(ship => {
-      if (ship.positions && Array.isArray(ship.positions)) {
-        ship.positions.forEach(pos => {
-          if (pos >= 0 && pos < gridSize) {
-            player.board[pos] = 'ship';
+        for (let i = 0; i < ship.positions.length - 1; i++) {
+          const currentPos = ship.positions[i];
+          const nextPos = ship.positions[i + 1];
+          const rowDiff = Math.floor(nextPos / cols) - Math.floor(currentPos / cols);
+          const colDiff = nextPos % cols - currentPos % cols;
+          if ((Math.abs(rowDiff) > 1 || Math.abs(colDiff) > 1) || (rowDiff !== 0 && colDiff !== 0)) {
+            throw new Error(`Invalid ship positions for ${ship.name}: Positions must be adjacent`);
           }
-        });
-        player.ships.push({
-          name: ship.name,
-          positions: ship.positions,
-          horizontal: ship.horizontal !== undefined ? ship.horizontal : true,
-          sunk: false,
-          hits: 0
-        });
+        }
+        for (const pos of ship.positions) {
+          if (pos < 0 || pos >= gridSize) {
+            throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
+          }
+          if (occupied.has(pos)) {
+            throw new Error(`Position ${pos} already occupied for ${ship.name}`);
+          }
+          occupied.add(pos);
+        }
       }
-    });
+      
+      player.board = Array(GRID_SIZE).fill('water');
+      player.ships = [];
 
-    io.to(playerId).emit('games', { 
-      count: Object.values(this.players).filter(p => p.ready).length,
-      grid: player.board,
-      ships: player.ships
-    });
-
-    const otherPlayers = Object.keys(this.players).filter(id => id !== playerId);
-    otherPlayers.forEach(id => {
-      io.to(id).emit('games', { 
-        count: Object.values(this.players).filter(p => p.ready).length
+      placements.forEach(ship => {
+        if (ship.positions && Array.isArray(ship.positions)) {
+          ship.positions.forEach(pos => {
+            if (pos >= 0 && pos < gridSize) {
+              player.board[pos] = 'ship';
+            }
+          });
+          player.ships.push({
+            name: ship.name,
+            positions: ship.positions,
+            horizontal: ship.horizontal !== undefined ? ship.horizontal : true,
+            sunk: false,
+            hits: 0
+          });
+        }
       });
-    });
+
+      io.to(playerId).emit('games', { 
+        count: Object.values(this.players).filter(p => p.ready).length,
+        grid: player.board,
+        ships: player.ships
+      });
+
+      const otherPlayers = Object.keys(this.players).filter(id => id !== playerId);
+      otherPlayers.forEach(id => {
+        io.to(id).emit('games', { 
+          count: Object.values(this.players).filter(p => p.ready).length
+        });
+      });
+    } catch (error) {
+      console.error('Update board error:', error.message);
+      io.to(playerId).emit('error', { message: error.message });
+      io.to(playerId).emit('updateBoard', { success: false });
+    }
   }
 
   placeShips(playerId, placements) {
@@ -637,79 +639,79 @@ class SeaBattleGame {
       return;
     }
 
-    for (const ship of placements) {
-      const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
-      if (!matchingConfig) {
-        io.to(playerId).emit('error', { message: `Unknown ship: ${ship.name}` });
-        return;
-      }
-      if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size || ship.positions.some(pos => pos < 0 || pos >= gridSize)) {
-        io.to(playerId).emit('error', { message: `Invalid ship positions for ${ship.name}` });
-        return;
-      }
-      for (let i = 0; i < ship.positions.length - 1; i++) {
-        const currentPos = ship.positions[i];
-        const nextPos = ship.positions[i + 1];
-        const rowDiff = Math.floor(nextPos / GRID_COLS) - Math.floor(currentPos / GRID_COLS);
-        const colDiff = nextPos % GRID_COLS - currentPos % GRID_COLS;
-        if ((Math.abs(rowDiff) > 1 || Math.abs(colDiff) > 1) || (rowDiff !== 0 && colDiff !== 0)) {
-          io.to(playerId).emit('error', { message: `Invalid ship positions for ${ship.name}: Positions must be adjacent` });
-          return;
+    try {
+      for (const ship of placements) {
+        const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
+        if (!matchingConfig) {
+          throw new Error(`Unknown ship: ${ship.name}`);
+        }
+        if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size || ship.positions.some(pos => pos < 0 || pos >= gridSize)) {
+          throw new Error(`Invalid ship positions for ${ship.name}`);
+        }
+        for (let i = 0; i < ship.positions.length - 1; i++) {
+          const currentPos = ship.positions[i];
+          const nextPos = ship.positions[i + 1];
+          const rowDiff = Math.floor(nextPos / GRID_COLS) - Math.floor(currentPos / GRID_COLS);
+          const colDiff = nextPos % GRID_COLS - currentPos % GRID_COLS;
+          if ((Math.abs(rowDiff) > 1 || Math.abs(colDiff) > 1) || (rowDiff !== 0 && colDiff !== 0)) {
+            throw new Error(`Invalid ship positions for ${ship.name}: Positions must be adjacent`);
+          }
+        }
+        for (const pos of ship.positions) {
+          if (pos < 0 || pos >= gridSize) {
+            throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
+          }
+          if (occupied.has(pos)) {
+            throw new Error(`Position ${pos} already occupied for ${ship.name}`);
+          }
+          occupied.add(pos);
         }
       }
-      for (const pos of ship.positions) {
-        if (pos < 0 || pos >= gridSize) {
-          io.to(playerId).emit('error', { message: `Position ${pos} out of bounds for ${ship.name}` });
-          return;
-        }
-        if (occupied.has(pos)) {
-          io.to(playerId).emit('error', { message: `Position ${pos} already occupied for ${ship.name}` });
-          return;
-        }
-        occupied.add(pos);
+      
+      player.board = Array(GRID_SIZE).fill('water');
+      player.ships = [];
+
+      placements.forEach(ship => {
+        ship.positions.forEach(pos => {
+          if (pos >= 0 && pos < gridSize) {
+            player.board[pos] = 'ship';
+          }
+        });
+        player.ships.push({
+          name: ship.name,
+          positions: ship.positions,
+          horizontal: ship.horizontal !== undefined ? ship.horizontal : true,
+          sunk: false,
+          hits: 0
+        });
+      });
+      
+      player.ready = true;
+      
+      if (this.placementTimers[playerId]) {
+        clearTimeout(this.placementTimers[playerId]);
+        delete this.placementTimers[playerId];
       }
+
+      io.to(playerId).emit('placementSaved');
+      io.to(playerId).emit('games', { 
+        count: Object.values(this.players).filter(p => p.ready).length,
+        grid: player.board,
+        ships: player.ships
+      });
+
+      const otherPlayers = Object.keys(this.players).filter(id => id !== playerId);
+      otherPlayers.forEach(id => {
+        io.to(id).emit('games', { 
+          count: Object.values(this.players).filter(p => p.ready).length
+        });
+      });
+
+      this.checkStartGame();
+    } catch (error) {
+      console.error('Save placement error:', error.message);
+      io.to(playerId).emit('error', { message: error.message });
     }
-    
-    player.board = Array(GRID_SIZE).fill('water');
-    player.ships = [];
-
-    placements.forEach(ship => {
-      ship.positions.forEach(pos => {
-        if (pos >= 0 && pos < gridSize) {
-          player.board[pos] = 'ship';
-        }
-      });
-      player.ships.push({
-        name: ship.name,
-        positions: ship.positions,
-        horizontal: ship.horizontal !== undefined ? ship.horizontal : true,
-        sunk: false,
-        hits: 0
-      });
-    });
-    
-    player.ready = true;
-    
-    if (this.placementTimers[playerId]) {
-      clearTimeout(this.placementTimers[playerId]);
-      delete this.placementTimers[playerId];
-    }
-
-    io.to(playerId).emit('placementSaved');
-    io.to(playerId).emit('games', { 
-      count: Object.values(this.players).filter(p => p.ready).length,
-      grid: player.board,
-      ships: player.ships
-    });
-
-    const otherPlayers = Object.keys(this.players).filter(id => id !== playerId);
-    otherPlayers.forEach(id => {
-      io.to(id).emit('games', { 
-        count: Object.values(this.players).filter(p => p.ready).length
-      });
-    });
-
-    this.checkStartGame();
   }
 
   checkStartGame() {
@@ -772,7 +774,7 @@ class SeaBattleGame {
           }
         }
 
-        // If no direction to follow or direction reset, target unfinished ships
+        // Target unfinished ships with adjacent hits based on percentage
         if (position === null && botState.targets.length > 0) {
           let target = botState.targets[0];
           if (target.hits.length >= 2 && !target.orientation) {
@@ -783,7 +785,15 @@ class SeaBattleGame {
           if (target.orientation) {
             position = this._botNextInLine(target, botState);
           }
-          if (position === null && target.queue.length > 0) {
+          if (position === null && target.queue.length === 0) {
+            const adjacents = this._botAdjacents(botState.lastHitPosition, botState);
+            const r = seededRandom();
+            let adjCount = 1;
+            if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.ONE_ADJACENT) adjCount = 1;
+            else if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.ONE_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.TWO_ADJACENT) adjCount = 2;
+            else if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.ONE_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.TWO_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.THREE_ADJACENT) adjCount = 3;
+            else adjCount = adjacents.length; // Instant sink
+            target.queue = adjacents.slice(0, adjCount);
             position = target.queue.shift();
           }
           if (position !== null) {
@@ -791,10 +801,6 @@ class SeaBattleGame {
             if (isHit) {
               target.hits.push(position);
               botState.lastHitPosition = position;
-              if (target.hits.length === 1) {
-                const adjacents = this._botAdjacents(position, botState);
-                target.queue = [...adjacents];
-              }
               if (this._isShipSunk(target, opponent)) {
                 target.sunk = true;
                 const nextInLine = this._botNextAfterSunk(target, botState, opponent);
@@ -812,7 +818,7 @@ class SeaBattleGame {
           }
         }
 
-        // If no target or position, pick a new one
+        // Pick a new position if no target or direction
         if (position === null) {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
@@ -843,10 +849,10 @@ class SeaBattleGame {
               const adj = this._botAdjacents(position, botState);
               let adjCount = 1;
               const r = seededRandom();
-              if (r < 0.25) adjCount = 1;
-              else if (r < 0.55) adjCount = 2;
-              else if (r < 0.75) adjCount = 3;
-              else adjCount = adj.length;
+              if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.ONE_ADJACENT) adjCount = 1;
+              else if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.ONE_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.TWO_ADJACENT) adjCount = 2;
+              else if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.ONE_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.TWO_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.THREE_ADJACENT) adjCount = 3;
+              else adjCount = adj.length; // Instant sink
               const adjSubset = adj.slice(0, adjCount);
 
               thisTarget = {
@@ -856,7 +862,7 @@ class SeaBattleGame {
                 queue: adjSubset,
                 sunk: false
               };
-              botState.targets.unshift(thisTarget); // Prioritize new target
+              botState.targets.unshift(thisTarget);
             } else {
               thisTarget.hits.push(position);
               thisTarget.queue = thisTarget.queue.filter(p => p !== position);
@@ -905,6 +911,11 @@ class SeaBattleGame {
       }, thinkingTime);
     } catch (error) {
       console.error('Bot error:', error);
+      this.turn = Object.keys(this.players).find(id => id !== playerId); // Force turn change on error
+      io.to(this.id).emit('nextTurn', { turn: this.turn });
+      if (this.players[this.turn].isBot && !this.winner) {
+        setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+      }
     }
   }
 
@@ -1316,11 +1327,4 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 4000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection:', reason);
 });
