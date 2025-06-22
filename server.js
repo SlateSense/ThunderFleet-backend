@@ -554,20 +554,30 @@ class SeaBattleGame {
     const rows = GRID_ROWS;
     const occupied = new Set();
 
+    // Validate all placements before applying changes
     for (const ship of placements) {
-      // Validate ship config and positions
       const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
       if (!matchingConfig) {
         throw new Error(`Unknown ship: ${ship.name}`);
       }
       if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size) {
-        throw new Error(`Invalid ship positions for ${ship.name}`);
+        throw new Error(`Invalid ship positions length for ${ship.name}. Expected ${matchingConfig.size}, got ${ship.positions.length}`);
       }
 
-      // Check for overlap and bounds
-      for (const pos of ship.positions) {
+      // Check for valid positions and ensure no overlap or out-of-bounds
+      const isHorizontal = ship.horizontal !== undefined ? ship.horizontal : true; // Default to horizontal if undefined
+      for (let i = 0; i < ship.positions.length; i++) {
+        const pos = ship.positions[i];
         if (pos < 0 || pos >= gridSize) {
           throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
+        }
+        const row = Math.floor(pos / cols);
+        const col = pos % cols;
+        if (isHorizontal && (i > 0 && col !== ship.positions[i - 1] % cols + 1)) {
+          throw new Error(`Invalid horizontal alignment for ${ship.name} at position ${pos}`);
+        }
+        if (!isHorizontal && (i > 0 && row !== Math.floor(ship.positions[i - 1] / cols) + 1)) {
+          throw new Error(`Invalid vertical alignment for ${ship.name} at position ${pos}`);
         }
         if (occupied.has(pos)) {
           throw new Error(`Position ${pos} already occupied for ${ship.name}`);
