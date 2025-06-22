@@ -851,37 +851,20 @@ class SeaBattleGame {
               thisTarget.orientation = (Math.abs(a - b) === 1) ? 'horizontal' : 'vertical';
             }
 
-            // 5. If ship is sunk, mark as sunk and try next grid in line (streak logic)
+            // 5. If ship is sunk, mark as sunk and always try next grid position
             if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
               thisTarget.sunk = true;
               if (thisTarget.orientation) {
-                // Only check the next cell in line ONCE (streak logic)
                 const nextGrid = this._botNextAfterSunk(thisTarget, botState, opponent);
-                if (
-                  nextGrid !== null &&
-                  !botState.triedPositions.has(nextGrid) &&
-                  nextGrid >= 0 && nextGrid < GRID_SIZE
-                ) {
-                  // If the next grid is a ship, immediately focus on it (continue streak)
-                  if (opponent.board[nextGrid] === 'ship') {
-                    const adj = this._botAdjacents(nextGrid, botState);
-                    botState.targets.unshift({
-                      shipId: null,
-                      hits: [],
-                      orientation: thisTarget.orientation,
-                      queue: [nextGrid, ...adj],
-                      sunk: false
-                    });
-                  } else {
-                    // If not a ship, just fire at it next turn (as a single-cell target)
-                    botState.targets.push({
-                      shipId: null,
-                      hits: [],
-                      orientation: thisTarget.orientation,
-                      queue: [nextGrid],
-                      sunk: false
-                    });
-                  }
+                if (nextGrid !== null) {
+                  // Always queue the next position, regardless of whether it's a ship
+                  botState.targets.push({
+                    shipId: null,
+                    hits: [],
+                    orientation: thisTarget.orientation,
+                    queue: [nextGrid],
+                    sunk: false
+                  });
                 }
               }
             }
@@ -972,7 +955,7 @@ class SeaBattleGame {
     const hits = target.hits.slice().sort((a, b) => a - b);
     const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
 
-    // Forward direction
+    // Forward direction (always next position)
     let forward = hits[hits.length - 1] + dir;
     if (
       forward >= 0 && forward < GRID_SIZE &&
@@ -981,7 +964,7 @@ class SeaBattleGame {
       return forward;
     }
 
-    // Backward direction
+    // Backward direction (fallback if forward is unavailable)
     let backward = hits[0] - dir;
     if (
       backward >= 0 && backward < GRID_SIZE &&
@@ -990,6 +973,7 @@ class SeaBattleGame {
       return backward;
     }
 
+    // If both directions are tried, return null to fall back to random
     return null;
   }
 
