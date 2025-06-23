@@ -773,21 +773,29 @@ class SeaBattleGame {
           }
         }
 
-        // 4. Targeting logic: finish any found ship before firing randomly
+        // 4. Targeting logic: always finish any found ship before firing randomly
         let unfinishedTargets = botState.targets.filter(
-          t => !t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0))
+          t => !t.sunk && t.hits && t.hits.length > 0
         );
-        let isTargeting = false;
         if (!position && unfinishedTargets.length > 0 && !this.botCheatMode[playerId]) {
-          isTargeting = true;
+          // Always focus on the first unfinished target
           let target = unfinishedTargets[0];
           // If orientation is known, streak in that direction
           if (target.orientation) {
             position = this._botNextInLine(target, botState);
-          }
-          // If no orientation or can't streak, try adjacents in queue
-          if (position === null && target.queue && target.queue.length > 0) {
-            position = target.queue.shift();
+            // If can't streak, try adjacents in queue
+            if (position === null && target.queue && target.queue.length > 0) {
+              position = target.queue.shift();
+            }
+          } else {
+            // If orientation not known, try adjacents in queue
+            if (target.queue && target.queue.length > 0) {
+              position = target.queue.shift();
+            } else {
+              // If no adjacents left, pick any untried cell of the target ship
+              const allTargetCells = target.hits.concat(target.queue || []);
+              position = allTargetCells.find(pos => !botState.triedPositions.has(pos));
+            }
           }
         }
 
