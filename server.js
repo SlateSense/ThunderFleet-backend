@@ -146,9 +146,7 @@ const io = socketio(server, {
     origin: '*',
     methods: ["GET", "POST"]
   },
-  transports: ['websocket'], // Enforce WebSocket, disable polling
-  pingTimeout: 30000, // 30 seconds timeout
-  pingInterval: 10000 // Ping every 10 seconds
+  transports: ['websocket', 'polling']
 });
 console.log('Debug-2025-06-16-2: Socket.IO initialized');
 
@@ -742,7 +740,7 @@ class SeaBattleGame {
       const opponentId = Object.keys(this.players).find(id => id !== playerId);
       const opponent = this.players[opponentId];
       const seededRandom = this.randomGenerators[playerId];
-      const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN) + BOT_THINKING_TIME.MIN) + 2000; // Add 2s buffer
+      const thinkingTime = Math.floor(seededRandom() * 1000) + 1000;
 
       setTimeout(() => {
         // 1. Always win if only 3 or fewer ship cells remain
@@ -760,9 +758,9 @@ class SeaBattleGame {
           console.log(`Bot ${playerId} entering cheat mode due to human sinking a ship without bot finding one`);
         }
 
+        if (!botState.targets) botState.targets = [];
+
         // 3. Handle cheat mode: Fire only at ship cells until a hit
-        let position = null;
-        let isHit = false;
         if (this.botCheatMode[playerId] && !botState.lastHit) {
           const availableShips = opponent.board
             .map((cell, idx) => cell === 'ship' && !botState.triedPositions.has(idx) ? idx : null)
@@ -770,31 +768,35 @@ class SeaBattleGame {
           if (availableShips.length > 0) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
-            this.botCheatMode[playerId] = false;
+            this.botCheatMode[playerId] = false; // Exit cheat mode if no ship cells remain
           }
         }
 
-        // 4. Targeting logic for hits
-        if (!position && botState.lastHit !== null) {
-          const unfinishedTargets = botState.targets.filter(t => !t.sunk && (t.queue.length > 0 || t.hits.length > 0));
-          if (unfinishedTargets.length > 0) {
-            const target = unfinishedTargets[0];
-            if (target.orientation) {
-              position = this._botNextInLine(target, botState);
-            }
-            if (!position && target.queue.length > 0) {
-              position = target.queue.shift();
-            }
-            if (position !== null) {
-              isHit = opponent.board[position] === 'ship';
-            }
+        let unfinishedTargets = botState.targets.filter(
+          t => !t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0))
+        );
+        let position = null;
+        let isTargeting = false;
+
+        if (unfinishedTargets.length > 0 && !this.botCheatMode[playerId]) {
+          isTargeting = true;
+          let target = unfinishedTargets[0];
+          if (target.orientation) {
+            position = this._botNextInLine(target, botState);
+          }
+          if (position === null && target.queue && target.queue.length > 0) {
+            position = target.queue.shift();
           }
         }
 
-        // 5. Fallback to random shot if no target or not in cheat mode post-hit
-        if (!position) {
+        // 4. If no unfinished targets or in cheat mode post-hit, pick random with probability
+        let isHit = false;
+        if (!isTargeting || this.botCheatMode[playerId]) {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
+          const availableShips = available.filter(pos => opponent.board[pos] === 'ship');
+          const availableWater = available.filter(pos => opponent.board[pos] !== 'ship');
+
           if (available.length === 0) {
             this.turn = opponentId;
             io.to(this.id).emit('nextTurn', { turn: this.turn });
@@ -804,25 +806,35 @@ class SeaBattleGame {
             return;
           }
 
-          const availableShips = available.filter(pos => opponent.board[pos] === 'ship');
-          const availableWater = available.filter(pos => opponent.board[pos] !== 'ship');
+          const hitChance = 0.6;
           const smartChance = 0.1;
           if (availableShips.length > 0 && seededRandom() < smartChance && !this.botCheatMode[playerId]) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
             position = available[Math.floor(seededRandom() * available.length)];
+            isHit = opponent.board[position] === 'ship';
           }
-          isHit = opponent.board[position] === 'ship';
         }
 
-        // 6. Fire at position
+        // 5. Fire at position
+        if (position === null) {
+          const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
+            .filter(pos => !botState.triedPositions.has(pos));
+          position = available[Math.floor(seededRandom() * available.length)] || position;
+        }
+
         botState.triedPositions.add(position);
+
+        if (isTargeting || (this.botCheatMode[playerId] && !botState.lastHit)) {
+          isHit = opponent.board[position] === 'ship';
+        }
 
         if (isHit) {
           opponent.board[position] = 'hit';
           this.shipHits[playerId]++;
           botState.lastHit = position;
 
+          // Exit cheat mode after first hit
           if (this.botCheatMode[playerId] && !botState.lastHit) {
             this.botCheatMode[playerId] = false;
             console.log(`Bot ${playerId} exiting cheat mode after first hit at ${position}`);
@@ -880,21 +892,27 @@ class SeaBattleGame {
         } else {
           opponent.board[position] = 'miss';
           if (this.botCheatMode[playerId]) {
-            this.botCheatMode[playerId] = false;
+            this.botCheatMode[playerId] = false; // Exit cheat mode on miss
           }
-          botState.lastHit = null;
         }
 
-        botState.targets = botState.targets.filter(t => !t.sunk && (t.queue.length > 0 || t.hits.length > 0));
+        botState.targets = botState.targets.filter(
+          t => (!t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0)))
+        );
 
-        // Batch emits to reduce server load
-        const fireResult = { player: playerId, position, hit: isHit };
-        io.to(opponentId).emit('fireResult', fireResult);
-        io.to(this.id).emit('fireResult', fireResult);
+        io.to(opponentId).emit('fireResult', {
+          player: playerId,
+          position,
+          hit: isHit
+        });
+        io.to(this.id).emit('fireResult', {
+          player: playerId,
+          position,
+          hit: isHit
+        });
 
         if (!isHit) {
           this.turn = opponentId;
-          io.to(this.id).emit('nextTurn', { turn: this.turn });
           if (this.players[this.turn].isBot) {
             setTimeout(() => {
               if (this.turn === opponentId && !this.winner) {
@@ -905,6 +923,8 @@ class SeaBattleGame {
         } else {
           setTimeout(() => this.botFireShot(playerId), thinkingTime);
         }
+
+        io.to(this.id).emit('nextTurn', { turn: this.turn });
 
         if (this.shipHits[playerId] >= this.totalShipCells) {
           this.endGame(playerId);
@@ -1322,7 +1342,7 @@ io.on('connection', (socket) => {
           delete game.placementTimers[socket.id];
         }
 
-        if (game.linebreakTimerInterval) {
+        if (game.matchmakingTimerInterval) {
           clearInterval(game.matchmakingTimerInterval);
           game.matchmakingTimerInterval = null;
         }
