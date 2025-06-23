@@ -783,7 +783,7 @@ class SeaBattleGame {
           // If orientation is known, streak in that direction as long as possible
           if (target.orientation) {
             // Try to streak in both directions until blocked
-            let streakPos = this._botNextInLine(target, botState);
+            let streakPos = this._botNextInLine(target, botState, opponent);
             if (streakPos !== null) {
               position = streakPos;
             } else if (target.queue && target.queue.length > 0) {
@@ -1021,14 +1021,32 @@ class SeaBattleGame {
   }
 
   // Helper: continue in line if orientation is known
-  _botNextInLine(target, botState) {
+  _botNextInLine(target, botState, opponent) {
     const hits = target.hits.slice().sort((a, b) => a - b);
     const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
-    const before = hits[0] - dir;
-    const after = hits[hits.length - 1] + dir;
-    if (!botState.triedPositions.has(before) && before >= 0 && before < GRID_SIZE) return before;
-    if (!botState.triedPositions.has(after) && after >= 0 && after < GRID_SIZE) return after;
-    if (target.queue.length > 0) return target.queue.shift();
+    // Try both directions, but streak as far as possible
+    for (const direction of [+1, -1]) {
+      let currentPos = direction === 1 ? hits[hits.length - 1] : hits[0];
+      while (true) {
+        let nextPos = currentPos + dir * direction;
+        // Out of bounds or already tried
+        if (nextPos < 0 || nextPos >= GRID_SIZE || botState.triedPositions.has(nextPos)) break;
+        // If next cell is water or miss, that's our next target
+        if (opponent.board[nextPos] === 'water' || opponent.board[nextPos] === 'miss') {
+          return nextPos;
+        }
+        // If next cell is ship and not hit, that's our next target
+        if (opponent.board[nextPos] === 'ship') {
+          return nextPos;
+        }
+        // If next cell is already hit, keep streaking
+        if (opponent.board[nextPos] === 'hit') {
+          currentPos = nextPos;
+          continue;
+        }
+        break;
+      }
+    }
     return null;
   }
 
