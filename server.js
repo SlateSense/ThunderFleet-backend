@@ -1024,7 +1024,7 @@ class SeaBattleGame {
   _botNextInLine(target, botState, opponent) {
     const hits = target.hits.slice().sort((a, b) => a - b);
     const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
-    // Try both directions, streak as far as possible
+    // Try both directions, but streak as far as possible
     for (const direction of [+1, -1]) {
       let currentPos = direction === 1 ? hits[hits.length - 1] : hits[0];
       while (true) {
@@ -1045,19 +1045,6 @@ class SeaBattleGame {
           continue;
         }
         break;
-      }
-    }
-    // If no streak found, check for any unhit cell of the target ship
-    if (target.shipId) {
-      // Find the ship by name
-      const ship = opponent.ships.find(s => s.name === target.shipId);
-      if (ship) {
-        const unhit = ship.positions.find(pos =>
-          !botState.triedPositions.has(pos) &&
-          opponent.board[pos] !== 'hit' &&
-          opponent.board[pos] !== 'miss'
-        );
-        if (unhit !== undefined) return unhit;
       }
     }
     return null;
