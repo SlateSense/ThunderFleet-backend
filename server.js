@@ -780,11 +780,14 @@ class SeaBattleGame {
         if (!position && unfinishedTargets.length > 0 && !this.botCheatMode[playerId]) {
           // Always focus on the first unfinished target
           let target = unfinishedTargets[0];
-          // If orientation is known, streak in that direction
+          // If orientation is known, streak in that direction as long as possible
           if (target.orientation) {
-            position = this._botNextInLine(target, botState);
-            // If can't streak, try adjacents in queue
-            if (position === null && target.queue && target.queue.length > 0) {
+            // Try to streak in both directions until blocked
+            let streakPos = this._botNextInLine(target, botState);
+            if (streakPos !== null) {
+              position = streakPos;
+            } else if (target.queue && target.queue.length > 0) {
+              // If can't streak, try adjacents in queue
               position = target.queue.shift();
             }
           } else {
