@@ -970,37 +970,31 @@ class SeaBattleGame {
   _botNextAfterSunk(target, botState, opponent) {
     const hits = target.hits.slice().sort((a, b) => a - b);
     const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
-    let currentPos = hits[hits.length - 1]; // Start from the last hit position
 
-    while (true) {
-      let nextPos = currentPos + dir;
-      if (nextPos < 0 || nextPos >= GRID_SIZE || botState.triedPositions.has(nextPos)) {
-        nextPos = hits[0] - dir;
-        if (nextPos < 0 || nextPos >= GRID_SIZE || botState.triedPositions.has(nextPos)) {
-          return null; // Both directions blocked, end streak
+    // Try both directions
+    for (const direction of [+1, -1]) {
+      let currentPos = direction === 1 ? hits[hits.length - 1] : hits[0];
+      while (true) {
+        let nextPos = currentPos + dir * direction;
+        // Out of bounds or already tried
+        if (nextPos < 0 || nextPos >= GRID_SIZE || botState.triedPositions.has(nextPos)) break;
+
+        // If next cell is water or miss, streak ends
+        if (opponent.board[nextPos] === 'water' || opponent.board[nextPos] === 'miss') {
+          return nextPos;
         }
-      }
-      if (opponent.board[nextPos] === 'water' || opponent.board[nextPos] === 'miss') {
-        return nextPos; // Stop at water or miss
-      }
-      if (opponent.board[nextPos] === 'ship') {
-        botState.triedPositions.add(nextPos); // Mark as tried to avoid reprocessing
-        currentPos = nextPos; // Continue streak
-        // Create a new target for the next ship if not already targeted
-        if (!botState.targets.some(t => t.hits.includes(nextPos) && !t.sunk)) {
-          const adj = this._botAdjacents(nextPos, botState);
-          botState.targets.push({
-            shipId: null,
-            hits: [nextPos],
-            orientation: target.orientation,
-            queue: adj,
-            sunk: false
-          });
+        // If next cell is ship or hit, keep streaking
+        if (opponent.board[nextPos] === 'ship' || opponent.board[nextPos] === 'hit') {
+          // Mark as tried to avoid infinite loop
+          botState.triedPositions.add(nextPos);
+          currentPos = nextPos;
+          continue;
         }
-        continue; // Keep going in the streak
+        break;
       }
-      return nextPos; // Return the last valid position
     }
+    // If both directions blocked, return null
+    return null;
   }
 
   // Helper: always win if 3 or fewer ship cells remain
