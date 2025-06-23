@@ -740,7 +740,7 @@ class SeaBattleGame {
       const opponentId = Object.keys(this.players).find(id => id !== playerId);
       const opponent = this.players[opponentId];
       const seededRandom = this.randomGenerators[playerId];
-      const thinkingTime = Math.floor(seededRandom() * 1000) + 1000;
+      const thinkingTime = Math.floor(seededRandom() * 2000) + 1000;
 
       setTimeout(() => {
         // 1. Always win if only 3 or fewer ship cells remain
@@ -752,7 +752,7 @@ class SeaBattleGame {
           return;
         }
 
-        // 2. Check for cheating revenge trigger
+        // 2. Cheating revenge: If human sinks a bot ship before bot finds any
         if (!this.botCheatMode[playerId] && this.humanSunkShips[opponentId] > 0 && this.shipHits[playerId] === 0) {
           this.botCheatMode[playerId] = true;
           console.log(`Bot ${playerId} entering cheat mode due to human sinking a ship without bot finding one`);
@@ -760,7 +760,8 @@ class SeaBattleGame {
 
         if (!botState.targets) botState.targets = [];
 
-        // 3. Handle cheat mode: Fire only at ship cells until a hit
+        // 3. Cheating mode: fire only at ship cells until a hit
+        let position = null;
         if (this.botCheatMode[playerId] && !botState.lastHit) {
           const availableShips = opponent.board
             .map((cell, idx) => cell === 'ship' && !botState.triedPositions.has(idx) ? idx : null)
@@ -768,35 +769,34 @@ class SeaBattleGame {
           if (availableShips.length > 0) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
-            this.botCheatMode[playerId] = false; // Exit cheat mode if no ship cells remain
+            this.botCheatMode[playerId] = false;
           }
         }
 
+        // 4. Targeting logic: finish any found ship before firing randomly
         let unfinishedTargets = botState.targets.filter(
           t => !t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0))
         );
-        let position = null;
         let isTargeting = false;
-
-        if (unfinishedTargets.length > 0 && !this.botCheatMode[playerId]) {
+        if (!position && unfinishedTargets.length > 0 && !this.botCheatMode[playerId]) {
           isTargeting = true;
           let target = unfinishedTargets[0];
+          // If orientation is known, streak in that direction
           if (target.orientation) {
             position = this._botNextInLine(target, botState);
           }
+          // If no orientation or can't streak, try adjacents in queue
           if (position === null && target.queue && target.queue.length > 0) {
             position = target.queue.shift();
           }
         }
 
-        // 4. If no unfinished targets or in cheat mode post-hit, pick random with probability
+        // 5. If not targeting, pick random with probability (smart guess)
         let isHit = false;
-        if (!isTargeting || this.botCheatMode[playerId]) {
+        if (!position) {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
           const availableShips = available.filter(pos => opponent.board[pos] === 'ship');
-          const availableWater = available.filter(pos => opponent.board[pos] !== 'ship');
-
           if (available.length === 0) {
             this.turn = opponentId;
             io.to(this.id).emit('nextTurn', { turn: this.turn });
@@ -805,29 +805,33 @@ class SeaBattleGame {
             }
             return;
           }
-
-          const hitChance = 0.6;
           const smartChance = 0.1;
           if (availableShips.length > 0 && seededRandom() < smartChance && !this.botCheatMode[playerId]) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
             position = available[Math.floor(seededRandom() * available.length)];
-            isHit = opponent.board[position] === 'ship';
           }
         }
 
-        // 5. Fire at position
-        if (position === null) {
+        // 6. Never fire at the same cell twice
+        if (botState.triedPositions.has(position) || opponent.board[position] === 'hit' || opponent.board[position] === 'miss') {
+          // Pick another available cell
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
-            .filter(pos => !botState.triedPositions.has(pos));
-          position = available[Math.floor(seededRandom() * available.length)] || position;
+            .filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'hit' && opponent.board[pos] !== 'miss');
+          if (available.length === 0) {
+            this.turn = opponentId;
+            io.to(this.id).emit('nextTurn', { turn: this.turn });
+            if (this.players[this.turn].isBot) {
+              setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+            }
+            return;
+          }
+          position = available[Math.floor(seededRandom() * available.length)];
         }
-
         botState.triedPositions.add(position);
 
-        if (isTargeting || (this.botCheatMode[playerId] && !botState.lastHit)) {
-          isHit = opponent.board[position] === 'ship';
-        }
+        // 7. Fire at position
+        isHit = opponent.board[position] === 'ship';
 
         if (isHit) {
           opponent.board[position] = 'hit';
@@ -840,10 +844,12 @@ class SeaBattleGame {
             console.log(`Bot ${playerId} exiting cheat mode after first hit at ${position}`);
           }
 
+          // Find which ship was hit
           const ship = opponent.ships.find(s => s.positions.includes(position));
           if (ship) {
             let thisTarget = botState.targets.find(t => t.shipId === ship.name && !t.sunk);
             if (!thisTarget) {
+              // Adjacent targeting with probabilities
               const adj = this._botAdjacents(position, botState);
               let adjCount = 1;
               const r = seededRandom();
@@ -866,25 +872,74 @@ class SeaBattleGame {
               thisTarget.queue = thisTarget.queue.filter(p => p !== position);
             }
 
+            // If orientation is not known, try to determine it
             if (!thisTarget.orientation && thisTarget.hits.length >= 2) {
               const [a, b] = thisTarget.hits;
               thisTarget.orientation = (Math.abs(a - b) === 1) ? 'horizontal' : 'vertical';
             }
 
+            // If ship is sunk, mark as sunk and streak in the same direction
             if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
               thisTarget.sunk = true;
               this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
               this.humanSunkShips[opponentId] = (this.humanSunkShips[opponentId] || 0) + 1;
               if (thisTarget.orientation) {
-                const nextGrid = this._botNextAfterSunk(thisTarget, botState, opponent);
-                if (nextGrid !== null) {
-                  botState.targets.push({
-                    shipId: null,
-                    hits: [],
-                    orientation: thisTarget.orientation,
-                    queue: [nextGrid],
-                    sunk: false
+                // Streak logic: keep firing in the same direction through consecutive ships
+                let nextGrid = this._botNextAfterSunk(thisTarget, botState, opponent);
+                while (nextGrid !== null && opponent.board[nextGrid] === 'ship') {
+                  // Fire at nextGrid immediately (simulate streak)
+                  opponent.board[nextGrid] = 'hit';
+                  this.shipHits[playerId]++;
+                  botState.triedPositions.add(nextGrid);
+                  io.to(opponentId).emit('fireResult', {
+                    player: playerId,
+                    position: nextGrid,
+                    hit: true
                   });
+                  io.to(this.id).emit('fireResult', {
+                    player: playerId,
+                    position: nextGrid,
+                    hit: true
+                  });
+                  // Update streak
+                  const nextShip = opponent.ships.find(s => s.positions.includes(nextGrid));
+                  if (nextShip) {
+                    nextShip.hits = (nextShip.hits || 0) + 1;
+                    if (nextShip.positions.every(pos => opponent.board[pos] === 'hit')) {
+                      this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
+                      this.humanSunkShips[opponentId] = (this.humanSunkShips[opponentId] || 0) + 1;
+                    }
+                  }
+                  if (this.shipHits[playerId] >= this.totalShipCells) {
+                    this.endGame(playerId);
+                    return;
+                  }
+                  // Prepare for next streak
+                  nextGrid = this._botNextAfterSunk({
+                    hits: [nextGrid],
+                    orientation: thisTarget.orientation
+                  }, botState, opponent);
+                }
+                // If nextGrid is water or miss, fire at it and stop streak
+                if (nextGrid !== null && (opponent.board[nextGrid] === 'water' || opponent.board[nextGrid] === 'miss')) {
+                  opponent.board[nextGrid] = 'miss';
+                  botState.triedPositions.add(nextGrid);
+                  io.to(opponentId).emit('fireResult', {
+                    player: playerId,
+                    position: nextGrid,
+                    hit: false
+                  });
+                  io.to(this.id).emit('fireResult', {
+                    player: playerId,
+                    position: nextGrid,
+                    hit: false
+                  });
+                  this.turn = opponentId;
+                  io.to(this.id).emit('nextTurn', { turn: this.turn });
+                  if (this.players[this.turn].isBot) {
+                    setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+                  }
+                  return;
                 }
               }
             }
@@ -892,10 +947,11 @@ class SeaBattleGame {
         } else {
           opponent.board[position] = 'miss';
           if (this.botCheatMode[playerId]) {
-            this.botCheatMode[playerId] = false; // Exit cheat mode on miss
+            this.botCheatMode[playerId] = false;
           }
         }
 
+        // Clean up finished targets
         botState.targets = botState.targets.filter(
           t => (!t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0)))
         );
@@ -913,6 +969,7 @@ class SeaBattleGame {
 
         if (!isHit) {
           this.turn = opponentId;
+          io.to(this.id).emit('nextTurn', { turn: this.turn });
           if (this.players[this.turn].isBot) {
             setTimeout(() => {
               if (this.turn === opponentId && !this.winner) {
@@ -923,8 +980,6 @@ class SeaBattleGame {
         } else {
           setTimeout(() => this.botFireShot(playerId), thinkingTime);
         }
-
-        io.to(this.id).emit('nextTurn', { turn: this.turn });
 
         if (this.shipHits[playerId] >= this.totalShipCells) {
           this.endGame(playerId);
@@ -937,7 +992,7 @@ class SeaBattleGame {
       this.turn = opponentId;
       io.to(this.id).emit('nextTurn', { turn: this.turn });
       if (this.players[this.turn].isBot) {
-        setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+        setTimeout(() => this.botFireShot(this.turn), 1500);
       }
     }
   }
