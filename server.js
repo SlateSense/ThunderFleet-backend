@@ -1324,58 +1324,98 @@ class SeaBattleGame {
   }
 
   fireShot(playerId, position) {
-    if (this.winner || playerId !== this.turn || this.players[playerId].isBot) return;
-    
+    if (this.winner || playerId !== this.turn) return false;
+
     const opponentId = Object.keys(this.players).find(id => id !== playerId);
     const opponent = this.players[opponentId];
-    const cell = opponent.board[position];
-    
-    let hit = false;
-    if (cell === 'ship') {
-      hit = true;
-      opponent.board[position] = 'hit';
-      this.shipHits[playerId]++;
-      
-      const ship = opponent.ships.find(s => s.positions.includes(position));
-      if (ship) {
-        ship.hits++;
-        if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
-          ship.sunk = true;
-          this.botSunkShips[opponentId] = (this.botSunkShips[opponentId] || 0) + 1;
-          this.humanSunkShips[playerId] = (this.humanSunkShips[playerId] || 0) + 1;
-        }
-      }
-      
-      if (this.shipHits[playerId] >= this.totalShipCells) {
-        this.endGame(playerId);
-        return;
-      }
-    } else {
-      opponent.board[position] = 'miss';
+    const player = this.players[playerId];
+
+    // Check if position is valid
+    if (position < 0 || position >= GRID_SIZE || 
+        opponent.board[position] === 'hit' || 
+        opponent.board[position] === 'miss') {
+      return false;
     }
 
-    io.to(playerId).emit('fireResult', {
+    const isHit = opponent.board[position] === 'ship';
+    let sunkShip = null;
+    
+    // Update the board
+    opponent.board[position] = isHit ? 'hit' : 'miss';
+
+    // Update ship hits if it was a hit
+    if (isHit) {
+      this.shipHits[playerId] = (this.shipHits[playerId] || 0) + 1;
+      
+      // Find and update the ship that was hit
+      const ship = opponent.ships.find(s => s.positions.includes(position));
+      if (ship) {
+        ship.hits = (ship.hits || 0) + 1;
+        ship.sunk = ship.hits >= ship.positions.length;
+        
+        if (ship.sunk) {
+          console.log(`${ship.name} has been sunk!`);
+          this.humanSunkShips[playerId] = (this.humanSunkShips[playerId] || 0) + 1;
+          sunkShip = ship;
+        }
+      }
+    }
+
+    // Emit fire result to both players
+    const fireResult = {
       player: playerId,
       position,
-      hit
-    });
+      hit: isHit,
+      sunk: !!sunkShip,
+      shipName: sunkShip?.name
+    };
     
-    if (!opponent.isBot) {
-      io.to(opponentId).emit('fireResult', {
-        player: playerId,
-        position,
-        hit
+    io.to(opponentId).emit('fireResult', fireResult);
+    io.to(playerId).emit('fireResult', fireResult);
+
+    // Check for win condition
+    if (this.shipHits[playerId] >= this.totalShipCells) {
+      this.endGame(playerId);
+      return true;
+    }
+
+    // If a ship was sunk, make sure all its positions are marked as hit
+    if (sunkShip) {
+      sunkShip.positions.forEach(pos => {
+        if (opponent.board[pos] !== 'hit') {
+          opponent.board[pos] = 'hit';
+          this.shipHits[playerId]++;
+          
+          const sinkUpdate = {
+            player: playerId,
+            position: pos,
+            hit: true,
+            sunk: true,
+            shipName: sunkShip.name
+          };
+          
+          io.to(opponentId).emit('fireResult', sinkUpdate);
+          io.to(playerId).emit('fireResult', sinkUpdate);
+        }
       });
     }
-    
-    if (!hit) {
+
+    // Switch turns if it was a miss
+    if (!isHit) {
       this.turn = opponentId;
+      io.to(this.id).emit('nextTurn', { turn: this.turn });
+      
+      // If next player is a bot, let them take their turn
       if (this.players[this.turn].isBot) {
         const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
         setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
+    } else {
+      // If it was a hit, same player goes again
+      io.to(this.id).emit('nextTurn', { turn: this.turn });
     }
-    io.to(this.id).emit('nextTurn', { turn: this.turn });
+
+    return true;
   }
 
   async endGame(playerId) {
