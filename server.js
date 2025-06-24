@@ -786,41 +786,29 @@ class SeaBattleGame {
       }
     }
 
-    // Sort hits to find the ends of the ship
-    const sortedHits = [...target.hits].sort((a, b) => {
-      if (target.orientation === 'horizontal') {
-        return (a % GRID_COLS) - (b % GRID_COLS);
-      } else {
-        return Math.floor(a / GRID_COLS) - Math.floor(b / GRID_COLS);
-      }
-    });
-
-    // Try both ends of the ship
-    const ends = [sortedHits[0], sortedHits[sortedHits.length - 1]];
-    
-    for (const end of ends) {
-      const row = Math.floor(end / GRID_COLS);
-      const col = end % GRID_COLS;
+    // If we know the orientation, try to find the next cell in line
+    if (target.orientation) {
+      const sortedHits = [...target.hits].sort((a, b) => a - b);
+      const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
       
-      let newRow = row;
-      let newCol = col;
+      // Try both ends of the ship
+      const ends = [sortedHits[0], sortedHits[sortedHits.length - 1]];
       
-      // Determine direction to check based on orientation and which end we're looking at
-      if (target.orientation === 'horizontal') {
-        // If this is the left end, check to the left, otherwise check to the right
-        newCol = col + (end === sortedHits[0] ? -1 : 1);
-      } else {
-        // If this is the top end, check above, otherwise check below
-        newRow = row + (end === sortedHits[0] ? -1 : 1);
-      }
-      
-      // Check if new position is within bounds
-      if (newRow >= 0 && newRow < GRID_ROWS && newCol >= 0 && newCol < GRID_COLS) {
-        const newPos = newRow * GRID_COLS + newCol;
+      for (const end of ends) {
+        // Check if we can continue in this direction
+        const nextPos = end + (end === sortedHits[0] ? -dir : dir);
         
-        // If we haven't tried this position and it's not a miss
-        if (!botState.triedPositions.has(newPos) && opponent.board[newPos] !== 'miss') {
-          return newPos;
+        // Check if next position is valid and not already tried
+        if (
+          nextPos >= 0 && 
+          nextPos < GRID_SIZE && 
+          !botState.triedPositions.has(nextPos) &&
+          // Make sure we stay in the same row (for horizontal) or column (for vertical)
+          (target.orientation === 'horizontal' ? 
+            Math.floor(nextPos / GRID_COLS) === Math.floor(end / GRID_COLS) :
+            (nextPos % GRID_COLS) === (end % GRID_COLS))
+        ) {
+          return nextPos;
         }
       }
     }
@@ -833,12 +821,13 @@ class SeaBattleGame {
     
     // Filter out duplicates and already tried positions
     const uniqueAdjacents = [...new Set(adjacents)].filter(
-      pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'miss'
+      pos => !botState.triedPositions.has(pos) && 
+             (opponent.board[pos] === 'ship' || opponent.board[pos] === 'water')
     );
     
-    // If we have any valid adjacent positions, return the first one
+    // If we have any valid adjacent positions, return a random one
     if (uniqueAdjacents.length > 0) {
-      return uniqueAdjacents[0];
+      return uniqueAdjacents[Math.floor(Math.random() * uniqueAdjacents.length)];
     }
 
     return null;
@@ -852,15 +841,37 @@ class SeaBattleGame {
     const lastHit = sortedHits[sortedHits.length - 1];
     const firstHit = sortedHits[0];
 
+    // Try continuing in positive direction
     let nextPos = lastHit + dir;
-    while (this._isValidPosition(nextPos, botState, opponent)) {
-      return nextPos;
+    while (nextPos >= 0 && nextPos < GRID_SIZE) {
+      // Check if we're still in the same row (for horizontal) or column (for vertical)
+      if ((target.orientation === 'horizontal' && 
+           Math.floor(nextPos / GRID_COLS) !== Math.floor(lastHit / GRID_COLS)) ||
+          (target.orientation === 'vertical' && 
+           (nextPos % GRID_COLS) !== (lastHit % GRID_COLS))) {
+        break;
+      }
+      
+      if (!botState.triedPositions.has(nextPos)) {
+        return nextPos;
+      }
       nextPos += dir;
     }
 
+    // Try continuing in negative direction
     nextPos = firstHit - dir;
-    while (this._isValidPosition(nextPos, botState, opponent)) {
-      return nextPos;
+    while (nextPos >= 0 && nextPos < GRID_SIZE) {
+      // Check if we're still in the same row (for horizontal) or column (for vertical)
+      if ((target.orientation === 'horizontal' && 
+           Math.floor(nextPos / GRID_COLS) !== Math.floor(firstHit / GRID_COLS)) ||
+          (target.orientation === 'vertical' && 
+           (nextPos % GRID_COLS) !== (firstHit % GRID_COLS))) {
+        break;
+      }
+      
+      if (!botState.triedPositions.has(nextPos)) {
+        return nextPos;
+      }
       nextPos -= dir;
     }
     
