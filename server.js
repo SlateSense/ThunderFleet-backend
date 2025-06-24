@@ -1381,28 +1381,23 @@ class SeaBattleGame {
 
     // If a ship was sunk, make sure all its positions are marked as hit
     if (sunkShip) {
-      console.log(`Marking all positions of ${sunkShip.name} as hit`);
-      const sinkUpdate = {
-        player: playerId,
-        position: -1, // Special value to indicate this is a ship sink update
-        hit: true,
-        sunk: true,
-        shipName: sunkShip.name,
-        positions: [...sunkShip.positions] // Send all positions of the sunk ship
-      };
-      
-      // Mark all positions as hit on the board
       sunkShip.positions.forEach(pos => {
         if (opponent.board[pos] !== 'hit') {
           opponent.board[pos] = 'hit';
           this.shipHits[playerId]++;
+          
+          const sinkUpdate = {
+            player: playerId,
+            position: pos,
+            hit: true,
+            sunk: true,
+            shipName: sunkShip.name
+          };
+          
+          io.to(opponentId).emit('fireResult', sinkUpdate);
+          io.to(playerId).emit('fireResult', sinkUpdate);
         }
       });
-      
-      // Send a single sink update with all positions
-      io.to(opponentId).emit('fireResult', sinkUpdate);
-      io.to(playerId).emit('fireResult', sinkUpdate);
-      console.log(`Sent sink update for ${sunkShip.name} at positions:`, sunkShip.positions);
     }
 
     // Switch turns if it was a miss
