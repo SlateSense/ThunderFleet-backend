@@ -1004,16 +1004,16 @@ class SeaBattleGame {
 
         // 2. Always finish current target before moving to a new one
         let position = null;
-        let currentTarget = botState.currentTarget ? 
+        let currentTargetObj = botState.currentTarget ? 
           botState.targets.find(t => t.shipId === botState.currentTarget) : null;
         
         // If current target exists and isn't sunk, continue targeting it
-        if (currentTarget && !currentTarget.sunk) {
-          if (currentTarget.orientation) {
-            position = this._botNextInLine(currentTarget, botState);
+        if (currentTargetObj && !currentTargetObj.sunk) {
+          if (currentTargetObj.orientation) {
+            position = this._botNextInLine(currentTargetObj, botState, opponent);
           }
-          if (position === null && currentTarget.queue && currentTarget.queue.length > 0) {
-            position = currentTarget.queue.shift();
+          if (position === null && currentTargetObj.queue && currentTargetObj.queue.length > 0) {
+            position = currentTargetObj.queue.shift();
           }
         } else {
           // If no current target or it's sunk, find a new one
@@ -1024,14 +1024,14 @@ class SeaBattleGame {
           if (unfinishedTargets.length > 0) {
             // Sort by number of hits (prioritize targets we've already hit)
             unfinishedTargets.sort((a, b) => b.hits.length - a.hits.length);
-            currentTarget = unfinishedTargets[0];
-            botState.currentTarget = currentTarget.shipId;
+            currentTargetObj = unfinishedTargets[0];
+            botState.currentTarget = currentTargetObj.shipId;
             
-            if (currentTarget.orientation) {
-              position = this._botNextInLine(currentTarget, botState);
+            if (currentTargetObj.orientation) {
+              position = this._botNextInLine(currentTargetObj, botState, opponent);
             }
-            if (position === null && currentTarget.queue && currentTarget.queue.length > 0) {
-              position = currentTarget.queue.shift();
+            if (position === null && currentTargetObj.queue && currentTargetObj.queue.length > 0) {
+              position = currentTargetObj.queue.shift();
             }
           }
         }
@@ -1051,10 +1051,10 @@ class SeaBattleGame {
         }
 
         // If we have a current target and it's not sunk
-        if (!position && botState.currentTarget && !botState.currentTarget.sunk) {
+        if (!position && currentTargetObj && !currentTargetObj.sunk) {
           // If we know the orientation, continue streaking
-          if (botState.currentTarget.orientation) {
-            let streakPos = this._botNextInLine(botState.currentTarget, botState, opponent);
+          if (currentTargetObj.orientation) {
+            let streakPos = this._botNextInLine(currentTargetObj, botState, opponent);
             if (streakPos !== null && streakPos !== undefined) {
               setTimeout(() => {
                 this.botFireShotAtPosition(playerId, streakPos);
@@ -1064,13 +1064,13 @@ class SeaBattleGame {
           }
 
           // If no streak position available, try queued adjacent positions
-          if (botState.currentTarget.queue && botState.currentTarget.queue.length > 0) {
-            position = botState.currentTarget.queue.shift();
+          if (currentTargetObj.queue && currentTargetObj.queue.length > 0) {
+            position = currentTargetObj.queue.shift();
           }
 
           // If no adjacents left, try any untried cell of the current ship
-          if (!position) {
-            const ship = opponent.ships.find(s => s.name === botState.currentTarget.shipId);
+          if (!position && currentTargetObj.shipId) {
+            const ship = opponent.ships.find(s => s.name === currentTargetObj.shipId);
             if (ship) {
               const unhit = ship.positions.find(pos =>
                 !botState.triedPositions.has(pos) &&
@@ -1078,10 +1078,7 @@ class SeaBattleGame {
                 opponent.board[pos] !== 'miss'
               );
               if (unhit !== undefined) {
-                setTimeout(() => {
-                  this.botFireShotAtPosition(playerId, unhit);
-                }, Math.floor(seededRandom() * 1000) + 500);
-                return;
+                position = unhit;
               }
             }
           }
