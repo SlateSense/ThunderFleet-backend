@@ -883,6 +883,7 @@ class SeaBattleGame {
       const thinkingTime = Math.floor(seededRandom() * 2000) + 1000;
 
       setTimeout(() => {
+        // Check if game is almost over and use special endgame strategy
         const remainingShipCells = opponent.board
           .map((cell, idx) => cell === 'ship' ? idx : null)
           .filter(idx => idx !== null && !botState.triedPositions.has(idx));
@@ -891,15 +892,19 @@ class SeaBattleGame {
           return;
         }
 
+        // Handle cheat mode if human is winning
         if (!this.botCheatMode[playerId] && this.humanSunkShips[opponentId] > 0 && this.shipHits[playerId] === 0) {
           this.botCheatMode[playerId] = true;
           console.log(`Bot ${playerId} entering cheat mode due to human sinking a ship without bot finding one`);
         }
 
+        // Initialize targets array if not exists
         if (!botState.targets) botState.targets = [];
 
         let position = null;
-        if (this.botCheatMode[playerId] && !botState.lastHit) {
+        
+        // If in cheat mode and no current target, try to find ship cells directly
+        if (this.botCheatMode[playerId] && !botState.currentTarget) {
           if (seededRandom() < 0.7) {
             const availableShips = opponent.board
               .map((cell, idx) => cell === 'ship' && !botState.triedPositions.has(idx) ? idx : null)
@@ -912,56 +917,49 @@ class SeaBattleGame {
           }
         }
 
-        let unfinishedTargets = botState.targets.filter(
-          t => !t.sunk && t.hits && t.hits.length > 0
-        );
-        if (!position && unfinishedTargets.length > 0 && !this.botCheatMode[playerId]) {
-          // Always focus on the first unfinished target
-          let target = unfinishedTargets[0];
-          // If orientation is known, streak in that direction as long as possible
-          if (target.orientation) {
-            let streakPos = this._botNextInLine(target, botState, opponent);
+        // If we have a current target and it's not sunk
+        if (!position && botState.currentTarget && !botState.currentTarget.sunk) {
+          // If we know the orientation, continue streaking
+          if (botState.currentTarget.orientation) {
+            let streakPos = this._botNextInLine(botState.currentTarget, botState, opponent);
             if (streakPos !== null && streakPos !== undefined) {
               setTimeout(() => {
                 this.botFireShotAtPosition(playerId, streakPos);
               }, Math.floor(seededRandom() * 1000) + 500);
               return;
-            } else if (target.queue && target.queue.length > 0) {
-              position = target.queue.shift();
-            } else {
-              // If no more streak or adjacents, check for any unhit cell of the ship
-              const ship = opponent.ships.find(s => s.name === target.shipId);
-              if (ship) {
-                const unhit = ship.positions.find(pos =>
-                  !botState.triedPositions.has(pos) &&
-                  opponent.board[pos] !== 'hit' &&
-                  opponent.board[pos] !== 'miss'
-                );
-                if (unhit !== undefined) {
-                  setTimeout(() => {
-                    this.botFireShotAtPosition(playerId, unhit);
-                  }, Math.floor(seededRandom() * 1000) + 500);
-                  return;
-                }
-              }
             }
-          } else {
-            // If orientation not known, try adjacents in queue
-            if (target.queue && target.queue.length > 0) {
-              position = target.queue.shift();
-            } else {
-              // If no adjacents left, pick any untried cell of the target ship
-              const allTargetCells = target.hits.concat(target.queue || []);
-              position = allTargetCells.find(pos => !botState.triedPositions.has(pos));
+          }
+
+          // If no streak position available, try queued adjacent positions
+          if (botState.currentTarget.queue && botState.currentTarget.queue.length > 0) {
+            position = botState.currentTarget.queue.shift();
+          }
+
+          // If no adjacents left, try any untried cell of the current ship
+          if (!position) {
+            const ship = opponent.ships.find(s => s.name === botState.currentTarget.shipId);
+            if (ship) {
+              const unhit = ship.positions.find(pos =>
+                !botState.triedPositions.has(pos) &&
+                opponent.board[pos] !== 'hit' &&
+                opponent.board[pos] !== 'miss'
+              );
+              if (unhit !== undefined) {
+                setTimeout(() => {
+                  this.botFireShotAtPosition(playerId, unhit);
+                }, Math.floor(seededRandom() * 1000) + 500);
+                return;
+              }
             }
           }
         }
 
-        let isHit = false;
-        if (!position) {
+        // If no position found and not in cheat mode, try random shot
+        if (!position && !this.botCheatMode[playerId]) {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
           const availableShips = available.filter(pos => opponent.board[pos] === 'ship');
+          
           if (available.length === 0) {
             this.turn = opponentId;
             io.to(this.id).emit('nextTurn', { turn: this.turn });
@@ -970,14 +968,17 @@ class SeaBattleGame {
             }
             return;
           }
+
+          // Smart chance to target known ship cells
           const smartChance = 0.1;
-          if (availableShips.length > 0 && seededRandom() < smartChance && !this.botCheatMode[playerId]) {
+          if (availableShips.length > 0 && seededRandom() < smartChance) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
             position = available[Math.floor(seededRandom() * available.length)];
           }
         }
 
+        // Ensure we don't shoot at already tried positions
         if (botState.triedPositions.has(position) || opponent.board[position] === 'hit' || opponent.board[position] === 'miss') {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'hit' && opponent.board[pos] !== 'miss');
@@ -993,8 +994,8 @@ class SeaBattleGame {
         }
         botState.triedPositions.add(position);
 
-        isHit = opponent.board[position] === 'ship';
-
+        // Handle hit case
+        const isHit = opponent.board[position] === 'ship';
         if (isHit) {
           opponent.board[position] = 'hit';
           this.shipHits[playerId]++;
