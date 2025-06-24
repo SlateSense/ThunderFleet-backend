@@ -760,34 +760,18 @@ class SeaBattleGame {
       let currentPos = direction === 1 ? hits[hits.length - 1] : hits[0];
       while (true) {
         let nextPos = currentPos + dir * direction;
-        // Out of bounds or already tried
         if (nextPos < 0 || nextPos >= GRID_SIZE || botState.triedPositions.has(nextPos)) break;
-        // If next cell is water or miss, that's our next target (to finish the streak)
         if (opponent.board[nextPos] === 'water' || opponent.board[nextPos] === 'miss') {
           return nextPos;
         }
-        // If next cell is ship and not hit, that's our next target
         if (opponent.board[nextPos] === 'ship') {
           return nextPos;
         }
-        // If next cell is already hit, keep streaking
         if (opponent.board[nextPos] === 'hit') {
           currentPos = nextPos;
           continue;
         }
         break;
-      }
-    }
-    // If no streak found, check for any unhit cell of the target ship (edge case)
-    if (target.shipId) {
-      const ship = opponent.ships.find(s => s.name === target.shipId);
-      if (ship) {
-        const unhit = ship.positions.find(pos =>
-          !botState.triedPositions.has(pos) &&
-          opponent.board[pos] !== 'hit' &&
-          opponent.board[pos] !== 'miss'
-        );
-        if (unhit !== undefined) return unhit;
       }
     }
     return null;
@@ -932,23 +916,41 @@ class SeaBattleGame {
           t => !t.sunk && t.hits && t.hits.length > 0
         );
         if (!position && unfinishedTargets.length > 0 && !this.botCheatMode[playerId]) {
+          // Always focus on the first unfinished target
           let target = unfinishedTargets[0];
+          // If orientation is known, streak in that direction as long as possible
           if (target.orientation) {
-            // Streak in both directions until blocked
             let streakPos = this._botNextInLine(target, botState, opponent);
             if (streakPos !== null && streakPos !== undefined) {
-              // Wait before firing at each streak cell
               setTimeout(() => {
                 this.botFireShotAtPosition(playerId, streakPos);
               }, Math.floor(seededRandom() * 1000) + 500);
               return;
             } else if (target.queue && target.queue.length > 0) {
               position = target.queue.shift();
+            } else {
+              // If no more streak or adjacents, check for any unhit cell of the ship
+              const ship = opponent.ships.find(s => s.name === target.shipId);
+              if (ship) {
+                const unhit = ship.positions.find(pos =>
+                  !botState.triedPositions.has(pos) &&
+                  opponent.board[pos] !== 'hit' &&
+                  opponent.board[pos] !== 'miss'
+                );
+                if (unhit !== undefined) {
+                  setTimeout(() => {
+                    this.botFireShotAtPosition(playerId, unhit);
+                  }, Math.floor(seededRandom() * 1000) + 500);
+                  return;
+                }
+              }
             }
           } else {
+            // If orientation not known, try adjacents in queue
             if (target.queue && target.queue.length > 0) {
               position = target.queue.shift();
             } else {
+              // If no adjacents left, pick any untried cell of the target ship
               const allTargetCells = target.hits.concat(target.queue || []);
               position = allTargetCells.find(pos => !botState.triedPositions.has(pos));
             }
