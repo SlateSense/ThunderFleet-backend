@@ -390,6 +390,11 @@ class SeaBattleGame {
     this.matchmakingTimerInterval = null;
     this.shipHits = {};
     this.totalShipCells = SHIP_CONFIG.reduce((sum, ship) => sum + ship.size, 0);
+    this.botShots = {};
+    this.botTargetedShip = {};
+    this.botCheatMode = {};
+    this.botSunkShips = {};
+    this.humanSunkShips = {};
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -414,6 +419,8 @@ class SeaBattleGame {
         hitMode: false,
         targets: []
       };
+      this.botShots[playerId] = new Set();
+      this.botTargetedShip[playerId] = null;
       this.autoPlaceShips(playerId);
       this.players[playerId].ready = true;
       console.log(`Bot ${playerId} joined and placed ships automatically.`);
@@ -781,6 +788,7 @@ class SeaBattleGame {
     const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN) + BOT_THINKING_TIME.MIN);
 
     setTimeout(() => {
+      // Win condition for last few cells
       const remainingShipCells = opponent.board
         .map((cell, idx) => cell === 'ship' && !botState.triedPositions.has(idx) ? idx : null)
         .filter(idx => idx !== null);
@@ -793,6 +801,7 @@ class SeaBattleGame {
       let currentTarget = botState.targets.find(t => !t.sunk && t.hits.length > 0);
 
       if (currentTarget) {
+        // Continue targeting the current ship
         if (currentTarget.orientation) {
           position = this._botNextInLine(currentTarget, botState, opponent);
         }
@@ -803,7 +812,7 @@ class SeaBattleGame {
           const ship = opponent.ships.find(s => s.name === currentTarget.shipId);
           position = ship.positions.find(pos => this._isValidPosition(pos, botState));
           if (!position) {
-            currentTarget.sunk = true;
+            currentTarget.sunk = true; // Mark as sunk if no valid positions remain
             botState.targets = botState.targets.filter(t => !t.sunk);
             currentTarget = null;
           }
@@ -811,6 +820,7 @@ class SeaBattleGame {
       }
 
       if (!currentTarget) {
+        // Find a new target or random shot
         const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
           .filter(pos => !botState.triedPositions.has(pos));
         if (available.length === 0) {
@@ -859,33 +869,6 @@ class SeaBattleGame {
           if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
             target.sunk = true;
             this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
-
-            // Continue firing along the sunk ship's orientation
-            const lastHit = target.hits[target.hits.length - 1];
-            const directions = target.orientation === 'horizontal' ? [1, -1] : [GRID_COLS, -GRID_COLS];
-            let nextPosition = null;
-
-            for (const dir of directions) {
-              let pos = lastHit + dir;
-              while (this._isValidPosition(pos, botState)) {
-                const row = Math.floor(pos / GRID_COLS);
-                const col = pos % GRID_COLS;
-                if ((target.orientation === 'horizontal' && row !== Math.floor(lastHit / GRID_COLS)) ||
-                    (target.orientation === 'vertical' && col !== lastHit % GRID_COLS)) {
-                  break;
-                }
-                nextPosition = pos;
-                botState.triedPositions.add(nextPosition);
-                const nextHit = opponent.board[nextPosition] === 'ship';
-                opponent.board[nextPosition] = nextHit ? 'hit' : 'miss';
-                this.shipHits[playerId] += nextHit ? 1 : 0;
-                io.to(opponentId).emit('fireResult', { player: playerId, position: nextPosition, hit: nextHit });
-                io.to(this.id).emit('fireResult', { player: playerId, position: nextPosition, hit: nextHit });
-                if (!nextHit) break;
-                pos += dir;
-              }
-              if (nextPosition && !opponent.board[nextPosition] === 'hit') break;
-            }
           }
         }
       } else {
