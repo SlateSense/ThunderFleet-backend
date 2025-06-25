@@ -815,6 +815,18 @@ class SeaBattleGame {
             currentTarget.sunk = true; // Mark as sunk if no valid positions remain
             botState.targets = botState.targets.filter(t => !t.sunk);
             currentTarget = null;
+
+            // Check next and previous positions after sinking
+            if (ship) {
+              const lastHitPos = currentTarget.hits[currentTarget.hits.length - 1];
+              const nextPos = lastHitPos + 1;
+              const prevPos = lastHitPos - 1;
+              if (nextPos < GRID_SIZE && !botState.triedPositions.has(nextPos) && opponent.board[nextPos] !== 'hit' && opponent.board[nextPos] !== 'miss') {
+                position = nextPos;
+              } else if (prevPos >= 0 && !botState.triedPositions.has(prevPos) && opponent.board[prevPos] !== 'hit' && opponent.board[prevPos] !== 'miss') {
+                position = prevPos;
+              }
+            }
           }
         }
       }
