@@ -778,6 +778,43 @@ class SeaBattleGame {
     return null;
   }
 
+  _fireNextPrevAfterSunk(playerId, opponentId, ship, opponent, botState) {
+    // Only check next and previous in the ship's orientation
+    const positions = ship.positions.slice().sort((a, b) => a - b);
+    const orientation = ship.horizontal ? 'horizontal' : 'vertical';
+    const first = positions[0];
+    const last = positions[positions.length - 1];
+
+    let nextPos, prevPos;
+    if (orientation === 'horizontal') {
+      nextPos = last + 1;
+      prevPos = first - 1;
+      // Ensure same row
+      if (Math.floor(nextPos / GRID_COLS) !== Math.floor(last / GRID_COLS)) nextPos = null;
+      if (Math.floor(prevPos / GRID_COLS) !== Math.floor(first / GRID_COLS)) prevPos = null;
+    } else {
+      nextPos = last + GRID_COLS;
+      prevPos = first - GRID_COLS;
+      // Ensure within grid
+      if (nextPos >= GRID_SIZE) nextPos = null;
+      if (prevPos < 0) prevPos = null;
+    }
+
+    [prevPos, nextPos].forEach(pos => {
+      if (
+        pos !== null &&
+        !botState.triedPositions.has(pos) &&
+        opponent.board[pos] !== 'hit' &&
+        opponent.board[pos] !== 'miss'
+      ) {
+        botState.triedPositions.add(pos);
+        opponent.board[pos] = 'miss';
+        io.to(opponentId).emit('fireResult', { player: playerId, position: pos, hit: false });
+        io.to(this.id).emit('fireResult', { player: playerId, position: pos, hit: false });
+      }
+    });
+  }
+
   botFireShot(playerId) {
     if (this.winner || playerId !== this.turn || !this.players[playerId].isBot) return;
 
@@ -881,6 +918,8 @@ class SeaBattleGame {
           if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
             target.sunk = true;
             this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
+            this._completeShipSinking(playerId, opponentId, target, opponent);
+            this._fireNextPrevAfterSunk(playerId, opponentId, ship, opponent, botState); // <--- add this line
           }
         }
       } else {
