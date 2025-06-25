@@ -869,6 +869,8 @@ class SeaBattleGame {
           if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
             target.sunk = true;
             this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
+            this._completeShipSinking(playerId, opponentId, target, opponent);
+            this._fireAroundSunkShip(playerId, opponentId, ship, opponent, botState); // <--- add this line
           }
         }
       } else {
@@ -999,6 +1001,41 @@ class SeaBattleGame {
       clearInterval(this.matchmakingTimerInterval);
     }
     delete games[this.id];
+  }
+
+  _fireAroundSunkShip(playerId, opponentId, ship, opponent, botState) {
+    // Get all adjacent cells around the sunk ship
+    const adjacents = new Set();
+    for (const pos of ship.positions) {
+      const row = Math.floor(pos / GRID_COLS);
+      const col = pos % GRID_COLS;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const nr = row + dr;
+          const nc = col + dc;
+          if (nr >= 0 && nr < GRID_ROWS && nc >= 0 && nc < GRID_COLS) {
+            const npos = nr * GRID_COLS + nc;
+            if (!ship.positions.includes(npos)) {
+              adjacents.add(npos);
+            }
+          }
+        }
+      }
+    }
+    // Fire at all valid adjacent cells that haven't been tried yet
+    adjacents.forEach(npos => {
+      if (
+        !botState.triedPositions.has(npos) &&
+        opponent.board[npos] !== 'hit' &&
+        opponent.board[npos] !== 'miss'
+      ) {
+        botState.triedPositions.add(npos);
+        opponent.board[npos] = 'miss';
+        io.to(opponentId).emit('fireResult', { player: playerId, position: npos, hit: false });
+        io.to(this.id).emit('fireResult', { player: playerId, position: npos, hit: false });
+      }
+    });
   }
 }
 
