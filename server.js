@@ -417,8 +417,7 @@ class SeaBattleGame {
         adjacentQueue: [],
         triedPositions: new Set(),
         hitMode: false,
-        targets: [],
-        missShotsAfterSink: 0
+        targets: []
       };
       this.botShots[playerId] = new Set();
       this.botTargetedShip[playerId] = null;
@@ -828,19 +827,6 @@ class SeaBattleGame {
                 position = prevPos;
               }
             }
-
-            // Add intentional misses after sinking
-            if (!position && botState.missShotsAfterSink === 0) {
-              botState.missShotsAfterSink = Math.floor(seededRandom() * 4) + 1; // 1 to 4 misses
-            }
-            if (botState.missShotsAfterSink > 0) {
-              const availableMisses = Array.from({ length: GRID_SIZE }, (_, i) => i)
-                .filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'ship');
-              if (availableMisses.length > 0) {
-                position = availableMisses[Math.floor(seededRandom() * availableMisses.length)];
-                botState.missShotsAfterSink--;
-              }
-            }
           }
         }
       }
@@ -895,7 +881,6 @@ class SeaBattleGame {
           if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
             target.sunk = true;
             this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
-            botState.missShotsAfterSink = 0; // Reset misses after sinking
           }
         }
       } else {
