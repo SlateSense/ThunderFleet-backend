@@ -445,33 +445,6 @@ class SeaBattleGame {
     }
   }
 
-  autoPlaceShips(playerId) {
-    const board = this.players[playerId].board;
-    const ships = [...SHIP_CONFIG];
-    const random = this.randomGenerators[playerId];
-    ships.forEach(ship => {
-      let placed = false;
-      while (!placed) {
-        const horizontal = random() > 0.5;
-        const start = Math.floor(random() * GRID_SIZE);
-        const positions = [];
-        for (let i = 0; i < ship.size; i++) {
-          const pos = horizontal ? start + i : start + i * GRID_COLS;
-          if (pos < GRID_SIZE && (horizontal ? pos % GRID_COLS >= start % GRID_COLS : true)) {
-            positions.push(pos);
-          } else {
-            break;
-          }
-        }
-        if (positions.length === ship.size && positions.every(pos => board[pos] === 'water')) {
-          positions.forEach(pos => board[pos] = 'ship');
-          ship.positions = positions;
-          placed = true;
-        }
-      }
-    });
-  }
-
   startMatchmaking() {
     const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
     humanPlayers.forEach(playerId => {
@@ -507,6 +480,74 @@ class SeaBattleGame {
     io.to(this.id).emit('startPlacing');
   }
 
+  autoPlaceShips(playerId) {
+    const player = this.players[playerId];
+    const gridSize = GRID_SIZE;
+    const cols = GRID_COLS;
+    const rows = GRID_ROWS;
+    
+    const placements = [];
+    const occupied = new Set();
+    
+    const seededRandom = this.randomGenerators[playerId];
+    
+    SHIP_CONFIG.forEach(shipConfig => {
+      let placed = false;
+      let attempts = 0;
+      
+      while (!placed && attempts < 100) {
+        attempts++;
+        const horizontal = seededRandom() > 0.5;
+        const row = Math.floor(seededRandom() * rows);
+        const col = Math.floor(seededRandom() * cols);
+        const positions = [];
+        let valid = true;
+        
+        for (let i = 0; i < shipConfig.size; i++) {
+          const pos = horizontal ? row * cols + col + i : (row + i) * cols + col;
+          
+          if (pos >= gridSize || 
+              (horizontal && col + shipConfig.size > cols) || 
+              (!horizontal && row + shipConfig.size > rows) || 
+              occupied.has(pos)) {
+            valid = false;
+            break;
+          }
+          positions.push(pos);
+        }
+        
+        if (valid) {
+          positions.forEach(pos => occupied.add(pos));
+          placements.push({
+            name: shipConfig.name,
+            positions,
+            horizontal,
+            sunk: false,
+            hits: 0
+          });
+          placed = true;
+        }
+      }
+    });
+    
+    player.board = Array(gridSize).fill('water');
+    placements.forEach(ship => {
+      ship.positions.forEach(pos => {
+        player.board[pos] = 'ship';
+      });
+    });
+    
+    player.ships = placements;
+    
+    if (!player.isBot) {
+      io.to(playerId).emit('games', { 
+        count: Object.values(this.players).filter(p => p.ready).length,
+        grid: player.board,
+        ships: placements
+      });
+    }
+  }
+
   updateBoard(playerId, placements) {
     const player = this.players[playerId];
     if (!player || player.ready || player.isBot) return;
@@ -522,12 +563,22 @@ class SeaBattleGame {
         throw new Error(`Unknown ship: ${ship.name}`);
       }
       if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size) {
-        throw new Error(`Invalid ship positions for ${ship.name}`);
+        throw new Error(`Invalid ship positions length for ${ship.name}. Expected ${matchingConfig.size}, got ${ship.positions.length}`);
       }
 
-      for (const pos of ship.positions) {
+      const isHorizontal = ship.horizontal !== undefined ? ship.horizontal : true;
+      for (let i = 0; i < ship.positions.length; i++) {
+        const pos = ship.positions[i];
         if (pos < 0 || pos >= gridSize) {
           throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
+        }
+        const row = Math.floor(pos / cols);
+        const col = pos % cols;
+        if (isHorizontal && (i > 0 && col !== ship.positions[i - 1] % cols + 1)) {
+          throw new Error(`Invalid horizontal alignment for ${ship.name} at position ${pos}`);
+        }
+        if (!isHorizontal && (i > 0 && row !== Math.floor(ship.positions[i - 1] / cols) + 1)) {
+          throw new Error(`Invalid vertical alignment for ${ship.name} at position ${pos}`);
         }
         if (occupied.has(pos)) {
           throw new Error(`Position ${pos} already occupied for ${ship.name}`);
@@ -540,20 +591,22 @@ class SeaBattleGame {
     player.ships = [];
 
     placements.forEach(ship => {
-      ship.positions.forEach(pos => {
-        if (pos >= 0 && pos < gridSize) {
-          player.board[pos] = 'ship';
-        }
-      });
-      player.ships.push({
-        name: ship.name,
-        positions: ship.positions,
-        horizontal: ship.horizontal,
-        sunk: false,
-        hits: 0
-      });
+      if (ship.positions && Array.isArray(ship.positions)) {
+        ship.positions.forEach(pos => {
+          if (pos >= 0 && pos < gridSize) {
+            player.board[pos] = 'ship';
+          }
+        });
+        player.ships.push({
+          name: ship.name,
+          positions: ship.positions,
+          horizontal: ship.horizontal,
+          sunk: false,
+          hits: 0
+        });
+      }
     });
-    
+
     io.to(playerId).emit('games', { 
       count: Object.values(this.players).filter(p => p.ready).length,
       grid: player.board,
@@ -676,7 +729,7 @@ class SeaBattleGame {
     return pos >= 0 && pos < GRID_SIZE && !botState.triedPositions.has(pos);
   }
 
-  _getAdjacentPositions(position, botState) {
+  _botAdjacents(position, botState) {
     const row = Math.floor(position / GRID_COLS);
     const col = position % GRID_COLS;
     const adjacents = [];
@@ -726,6 +779,43 @@ class SeaBattleGame {
     return null;
   }
 
+  _fireNextPrevAfterSunk(playerId, opponentId, ship, opponent, botState) {
+    // Only check next and previous in the ship's orientation
+    const positions = ship.positions.slice().sort((a, b) => a - b);
+    const orientation = ship.horizontal ? 'horizontal' : 'vertical';
+    const first = positions[0];
+    const last = positions[positions.length - 1];
+
+    let nextPos = null, prevPos = null;
+    if (orientation === 'horizontal') {
+      nextPos = last + 1;
+      prevPos = first - 1;
+      // Ensure same row
+      if (Math.floor(nextPos / GRID_COLS) !== Math.floor(last / GRID_COLS)) nextPos = null;
+      if (Math.floor(prevPos / GRID_COLS) !== Math.floor(first / GRID_COLS)) prevPos = null;
+    } else {
+      nextPos = last + GRID_COLS;
+      prevPos = first - GRID_COLS;
+      // Ensure within grid
+      if (nextPos >= GRID_SIZE) nextPos = null;
+      if (prevPos < 0) prevPos = null;
+    }
+
+    [prevPos, nextPos].forEach(pos => {
+      if (
+        pos !== null &&
+        !botState.triedPositions.has(pos) &&
+        opponent.board[pos] !== 'hit' &&
+        opponent.board[pos] !== 'miss'
+      ) {
+        botState.triedPositions.add(pos);
+        opponent.board[pos] = 'miss';
+        io.to(opponentId).emit('fireResult', { player: playerId, position: pos, hit: false });
+        io.to(this.id).emit('fireResult', { player: playerId, position: pos, hit: false });
+      }
+    });
+  }
+
   botFireShot(playerId) {
     if (this.winner || playerId !== this.turn || !this.players[playerId].isBot) return;
 
@@ -733,64 +823,143 @@ class SeaBattleGame {
     const opponentId = Object.keys(this.players).find(id => id !== playerId);
     const opponent = this.players[opponentId];
     const seededRandom = this.randomGenerators[playerId];
-    const thinkingTime = Math.floor(seededRandom() * 2000) + 1000;
+    const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN) + BOT_THINKING_TIME.MIN);
 
     setTimeout(() => {
+      // --- Miss for 1-4 turns after sinking a ship ---
+      if (botState.missQueue && botState.missQueue > 0) {
+        const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
+          .filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'hit' && opponent.board[pos] !== 'miss');
+        if (available.length > 0) {
+          const missPos = available[Math.floor(seededRandom() * available.length)];
+          botState.triedPositions.add(missPos);
+          opponent.board[missPos] = 'miss';
+          io.to(opponentId).emit('fireResult', { player: playerId, position: missPos, hit: false });
+          io.to(this.id).emit('fireResult', { player: playerId, position: missPos, hit: false });
+          botState.missQueue--;
+          // Pass turn to human
+          this.turn = opponentId;
+          io.to(this.id).emit('nextTurn', { turn: this.turn });
+          if (this.players[this.turn].isBot) {
+            setTimeout(() => this.botFireShot(this.turn), Math.floor(seededRandom() * 1000) + 1000);
+          }
+          return;
+        }
+      }
+      // --- End miss logic ---
+
+      // Win condition for last few cells
+      const remainingShipCells = opponent.board
+        .map((cell, idx) => cell === 'ship' && !botState.triedPositions.has(idx) ? idx : null)
+        .filter(idx => idx !== null);
+      if (remainingShipCells.length <= 3 && remainingShipCells.length > 0) {
+        this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
+        return;
+      }
+
       let position = null;
       let currentTarget = botState.targets.find(t => !t.sunk && t.hits.length > 0);
 
-      // Ensure cheat mode is active
-      const cheatMode = true;
-
-      // If only 3 or fewer cells are left, destroy all remaining ships
-      const remainingCells = opponent.board.filter(cell => cell === 'ship').length;
-      if (remainingCells <= 3) {
-        opponent.board.forEach((cell, index) => {
-          if (cell === 'ship' && !botState.triedPositions.has(index)) {
-            position = index;
-          }
-        });
-      }
-
-      if (!position) {
-        // Random shot selection with cheat mode
-        const untried = Array.from({ length: GRID_SIZE }, (_, i) => i).filter(i => !botState.triedPositions.has(i));
-        if (cheatMode) {
-          const shipCells = untried.filter(pos => opponent.board[pos] === 'ship');
-          if (shipCells.length > 0) {
-            position = shipCells[Math.floor(seededRandom() * shipCells.length)];
-          }
+      if (currentTarget) {
+        // Continue targeting the current ship
+        if (currentTarget.orientation) {
+          position = this._botNextInLine(currentTarget, botState, opponent);
+        }
+        if (!position && currentTarget.queue.length > 0) {
+          position = currentTarget.queue.shift();
         }
         if (!position) {
-          position = untried[Math.floor(seededRandom() * untried.length)];
+          const ship = opponent.ships.find(s => s.name === currentTarget.shipId);
+          position = ship.positions.find(pos => this._isValidPosition(pos, botState));
+          if (!position) {
+            currentTarget.sunk = true; // Mark as sunk if no valid positions remain
+            botState.targets = botState.targets.filter(t => !t.sunk);
+            currentTarget = null;
+
+            // Fire at next/prev after sinking
+            if (ship) {
+              this._fireNextPrevAfterSunk(playerId, opponentId, ship, opponent, botState);
+              if (!botState.missQueue) botState.missQueue = 0;
+              botState.missQueue += Math.floor(seededRandom() * 4) + 1; // 1-4 misses
+            }
+          }
         }
       }
 
-      if (position !== null) {
-        botState.triedPositions.add(position);
-        const hit = opponent.board[position] === 'ship';
-        io.to(opponentId).emit('shotFired', { position, playerId, hit });
-        io.to(playerId).emit('shotResult', { position, hit, playerId });
-
-        if (hit) {
-          this.shipHits[playerId] = (this.shipHits[playerId] || 0) + 1;
-          botState.hitMode = true;
-          botState.lastHit = position;
-
-          // Check win condition
-          if (opponent.board.every((cell, index) => botState.triedPositions.has(index) || cell !== 'ship')) {
-            this.winner = playerId;
-            io.to(playerId).emit('gameOver', { winner: playerId });
-            io.to(opponentId).emit('gameOver', { winner: playerId });
-            return;
-          }
+      if (!currentTarget) {
+        // Find a new target or random shot
+        const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
+          .filter(pos => !botState.triedPositions.has(pos));
+        if (available.length === 0) {
+          this.turn = opponentId;
+          io.to(this.id).emit('nextTurn', { turn: this.turn });
+          return;
         }
 
-        if (botState.hitMode || (hit && cheatMode)) {
-          this.botFireShot(playerId);
-        } else {
-          this.turn = opponentId;
-          io.to(opponentId).emit('yourTurn');
+        const shipCells = available.filter(pos => opponent.board[pos] === 'ship');
+        position = shipCells.length > 0 && seededRandom() < BOT_BEHAVIOR.HIT_CHANCE
+          ? shipCells[Math.floor(seededRandom() * shipCells.length)]
+          : available[Math.floor(seededRandom() * available.length)];
+      }
+
+      botState.triedPositions.add(position);
+      const isHit = opponent.board[position] === 'ship';
+
+      if (isHit) {
+        opponent.board[position] = 'hit';
+        this.shipHits[playerId]++;
+        botState.lastHit = position;
+
+        const ship = opponent.ships.find(s => s.positions.includes(position));
+        if (ship) {
+          ship.hits++;
+          let target = botState.targets.find(t => t.shipId === ship.name);
+          if (!target) {
+            target = {
+              shipId: ship.name,
+              hits: [position],
+              orientation: null,
+              queue: this._botAdjacents(position, botState),
+              sunk: false
+            };
+            botState.targets.push(target);
+          } else {
+            target.hits.push(position);
+            target.queue = target.queue.filter(p => p !== position);
+          }
+
+          if (target.hits.length >= 2 && !target.orientation) {
+            const [a, b] = target.hits;
+            target.orientation = Math.abs(a - b) === 1 ? 'horizontal' : 'vertical';
+          }
+
+          if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
+            target.sunk = true;
+            this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
+            this._fireNextPrevAfterSunk(playerId, opponentId, ship, opponent, botState);
+            if (!botState.missQueue) botState.missQueue = 0;
+            botState.missQueue += Math.floor(seededRandom() * 4) + 1; // 1-4 misses
+          }
+        }
+      } else {
+        opponent.board[position] = 'miss';
+      }
+
+      io.to(opponentId).emit('fireResult', { player: playerId, position, hit: isHit });
+      io.to(this.id).emit('fireResult', { player: playerId, position, hit: isHit });
+
+      if (this.shipHits[playerId] >= this.totalShipCells) {
+        this.endGame(playerId);
+        return;
+      }
+
+      if (isHit) {
+        setTimeout(() => this.botFireShot(playerId), thinkingTime);
+      } else {
+        this.turn = opponentId;
+        io.to(this.id).emit('nextTurn', { turn: this.turn });
+        if (this.players[this.turn].isBot) {
+          setTimeout(() => this.botFireShot(this.turn), thinkingTime);
         }
       }
     }, thinkingTime);
@@ -805,56 +974,13 @@ class SeaBattleGame {
     botState.triedPositions.add(position);
 
     io.to(opponentId).emit('fireResult', { player: playerId, position, hit: true });
-    io.to(playerId).emit('fireResult', { player: playerId, position, hit: true });
+    io.to(this.id).emit('fireResult', { player: playerId, position, hit: true });
 
     if (this.shipHits[playerId] >= this.totalShipCells) {
       this.endGame(playerId);
     } else {
       setTimeout(() => this.botFireShot(playerId), Math.floor(Math.random() * 1000) + 1000);
     }
-  }
-
-  async endGame(playerId) {
-    this.winner = playerId;
-    try {
-      const winnerAddress = this.players[playerId].lightningAddress;
-      const payout = this.calculatePayout();
-      
-      const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
-      if (this.players[playerId].isBot) {
-        humanPlayers.forEach(id => {
-          io.to(id).emit('gameEnd', { message: 'You lost! Better luck next time!' });
-        });
-      } else {
-        const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
-        console.log('Winner payment sent:', winnerPayment);
-        const platformFee = await sendPayment('slatesense@tryspeed.com', payout.platformFee, 'SATS');
-        console.log('Platform fee sent:', platformFee);
-        humanPlayers.forEach(id => {
-          io.to(id).emit('gameEnd', { 
-            message: id === playerId ? `You won! ${payout.winner} sats awarded!` : 'You lost!'
-          });
-        });
-      }
-    } catch (error) {
-      console.error('Payment error:', error.message);
-      io.to(this.id).emit('error', { message: `Payment failed: ${error.message}` });
-    }
-    this.cleanup();
-  }
-
-  calculatePayout() {
-    return PAYOUTS[this.betAmount];
-  }
-
-  cleanup() {
-    Object.keys(this.placementTimers).forEach(playerId => {
-      clearTimeout(this.placementTimers[playerId]);
-    });
-    if (this.matchmakingTimerInterval) {
-      clearInterval(this.matchmakingTimerInterval);
-    }
-    delete games[this.id];
   }
 
   fireShot(playerId, position) {
@@ -899,6 +1025,50 @@ class SeaBattleGame {
       }
     }
     return true;
+  }
+
+  async endGame(playerId) {
+    this.winner = playerId;
+    
+    try {
+      const winnerAddress = this.players[playerId].lightningAddress;
+      const payout = PAYOUTS[this.betAmount];
+      if (!payout) {
+        throw new Error('Invalid bet amount for payout');
+      }
+
+      const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
+      if (this.players[playerId].isBot) {
+        humanPlayers.forEach(id => {
+          io.to(id).emit('gameEnd', { message: 'You lost! Better luck next time!' });
+        });
+      } else {
+        const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
+        console.log('Winner payment sent:', winnerPayment);
+        const platformFee = await sendPayment('slatesense@tryspeed.com', payout.platformFee, 'SATS');
+        console.log('Platform fee sent:', platformFee);
+        humanPlayers.forEach(id => {
+          io.to(id).emit('gameEnd', { 
+            message: id === playerId ? `You won! ${payout.winner} sats awarded!` : 'You lost!'
+          });
+        });
+      }
+    } catch (error) {
+      console.error('Payment error:', error.message);
+      io.to(this.id).emit('error', { message: `Payment failed: ${error.message}` });
+    } finally {
+      this.cleanup();
+    }
+  }
+
+  cleanup() {
+    Object.keys(this.placementTimers).forEach(playerId => {
+      clearTimeout(this.placementTimers[playerId]);
+    });
+    if (this.matchmakingTimerInterval) {
+      clearInterval(this.matchmakingTimerInterval);
+    }
+    delete games[this.id];
   }
 }
 
