@@ -422,6 +422,8 @@ class SeaBattleGame {
       };
       this.botShots[playerId] = new Set();
       this.botTargetedShip[playerId] = null;
+      // Enable cheat mode by default for bot difficulty experimentation
+      this.botCheatMode[playerId] = true;
       this.autoPlaceShips(playerId);
       this.players[playerId].ready = true;
       console.log(`Bot ${playerId} joined and placed ships automatically.`);
@@ -856,6 +858,28 @@ class SeaBattleGame {
     const opponentId = Object.keys(this.players).find(id => id !== playerId);
     const opponent = this.players[opponentId];
     const seededRandom = this.randomGenerators[playerId];
+    const cheatMode = this.botCheatMode[playerId];
+    
+    // Calculate if human is ahead (has sunk more ships)
+    const humanShipsSunk = Object.values(this.players)
+      .filter(p => !p.isBot)
+      .reduce((acc, p) => acc + (p.ships.filter(s => s.hits >= s.positions.length).length), 0);
+      
+    const botShipsSunk = Object.values(this.players)
+      .filter(p => p.isBot)
+      .reduce((acc, p) => acc + (p.ships.filter(s => s.hits >= s.positions.length).length), 0);
+      
+    // Activate cheat mode temporarily if human is ahead by more than 1 ship
+    if (humanShipsSunk > botShipsSunk + 1 && !cheatMode) {
+      this.botCheatMode[playerId] = true;
+      this.botCheatMode[playerId + '_temp'] = true; // Mark as temporary cheat mode
+    }
+    
+    // If this was temporary cheat mode and bot has caught up, deactivate it
+    if (this.botCheatMode[playerId + '_temp'] && botShipsSunk >= humanShipsSunk) {
+      this.botCheatMode[playerId] = false;
+      delete this.botCheatMode[playerId + '_temp'];
+    }
     
     // Randomize thinking time between 1-3 seconds for more human-like behavior
     const thinkingTime = Math.floor(seededRandom() * 2000) + 1000;
@@ -917,14 +941,17 @@ class SeaBattleGame {
           return;
         }
         
-        // 50% chance to hit a ship if one is available, otherwise random
-        const shipCells = available.filter(pos => opponent.board[pos] === 'ship');
-        if (shipCells.length > 0 && Math.random() < 0.5) {
-          // Pick a random ship cell
+        let shipCells = available.filter(pos => opponent.board[pos] === 'ship');
+        if (cheatMode && shipCells.length > 0) {
+          // In cheat mode always hit a ship cell if one is available
           position = shipCells[Math.floor(seededRandom() * shipCells.length)];
         } else {
-          // Pick a completely random available position
-          position = available[Math.floor(seededRandom() * available.length)];
+          // 50% chance to hit a ship if one is available, otherwise random
+          if (shipCells.length > 0 && Math.random() < 0.5) {
+            position = shipCells[Math.floor(seededRandom() * shipCells.length)];
+          } else {
+            position = available[Math.floor(seededRandom() * available.length)];
+          }
         }
       }
 
@@ -939,6 +966,13 @@ class SeaBattleGame {
         const ship = opponent.ships.find(s => s.positions.includes(position));
         if (ship) {
           ship.hits++;
+          
+          // If cheat mode is enabled, instantly finish the rest of this ship
+          if (cheatMode && !ship.positions.every(pos => opponent.board[pos] === 'hit')) {
+            const remainingCells = ship.positions.filter(pos => opponent.board[pos] !== 'hit');
+            this._botTargetAndDestroy(playerId, opponentId, remainingCells);
+            return;
+          }
           
           // Find or create target for this ship
           let target = botState.targets.find(t => t.shipId === ship.name);
@@ -1008,7 +1042,7 @@ class SeaBattleGame {
             this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
             
             // Add a small chance to miss after sinking a ship (more human-like)
-            if (Math.random() < 0.3) {
+            if (!cheatMode && Math.random() < 0.3) {
               const availableMisses = Array.from({ length: GRID_SIZE }, (_, i) => i)
                 .filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'ship');
               if (availableMisses.length > 0) {
