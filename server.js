@@ -780,7 +780,7 @@ class SeaBattleGame {
 
     // Shuffle directions for more natural behavior
     for (let i = directions.length - 1; i > 0; i--) {
-      const j = Math.floor(seededRandom() * (i + 1));
+      const j = Math.floor(Math.random() * (i + 1));
       [directions[i], directions[j]] = [directions[j], directions[i]];
     }
 
