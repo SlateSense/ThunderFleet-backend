@@ -789,55 +789,64 @@ class SeaBattleGame {
     const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN) + BOT_THINKING_TIME.MIN);
 
     setTimeout(() => {
-      // 50% chance to hit a ship if available, else random
-      let position = null;
-      let direction = botState.direction;
-      let lastHit = botState.lastHit;
-      let continueLine = false;
+      // Win condition for last few cells
+      const remainingShipCells = opponent.board
+        .map((cell, idx) => cell === 'ship' && !botState.triedPositions.has(idx) ? idx : null)
+        .filter(idx => idx !== null);
+      if (remainingShipCells.length <= 3 && remainingShipCells.length > 0) {
+        this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
+        return;
+      }
 
-      // If we have a last hit, try to continue in a direction
-      if (lastHit !== null && direction !== undefined) {
-        let nextPos = lastHit + direction;
-        while (
-          nextPos >= 0 && nextPos < GRID_SIZE &&
-          !botState.triedPositions.has(nextPos) &&
-          (
-            (direction === 1 || direction === -1) ? Math.floor(nextPos / GRID_COLS) === Math.floor(lastHit / GRID_COLS)
-            : true
-          )
-        ) {
-          position = nextPos;
-          continueLine = true;
-          break;
+      let position = null;
+      let currentTarget = botState.targets.find(t => !t.sunk && t.hits.length > 0);
+
+      if (currentTarget) {
+        // Continue targeting the current ship
+        if (currentTarget.orientation) {
+          position = this._botNextInLine(currentTarget, botState, opponent);
         }
-        // If can't continue, try the other direction from the original hit
-        if (!continueLine && botState.firstHit !== undefined) {
-          let otherDir = direction === 1 ? -1 : direction === -1 ? 1 : direction === GRID_COLS ? -GRID_COLS : GRID_COLS;
-          let nextPos2 = botState.firstHit + otherDir;
-          while (
-            nextPos2 >= 0 && nextPos2 < GRID_SIZE &&
-            !botState.triedPositions.has(nextPos2) &&
-            (
-              (otherDir === 1 || otherDir === -1) ? Math.floor(nextPos2 / GRID_COLS) === Math.floor(botState.firstHit / GRID_COLS)
-              : true
-            )
-          ) {
-            position = nextPos2;
-            botState.direction = otherDir;
-            botState.lastHit = nextPos2;
-            continueLine = true;
-            break;
-          }
-          if (!continueLine) {
-            botState.lastHit = null;
-            botState.direction = undefined;
-            botState.firstHit = undefined;
+        if (!position && currentTarget.queue.length > 0) {
+          position = currentTarget.queue.shift();
+        }
+        if (!position) {
+          const ship = opponent.ships.find(s => s.name === currentTarget.shipId);
+          position = ship.positions.find(pos => this._isValidPosition(pos, botState));
+          if (!position) {
+            currentTarget.sunk = true; // Mark as sunk if no valid positions remain
+            botState.targets = botState.targets.filter(t => !t.sunk);
+            currentTarget = null;
+
+            // Check next and previous positions after sinking
+            if (ship) {
+              const lastHitPos = currentTarget.hits[currentTarget.hits.length - 1];
+              const nextPos = lastHitPos + 1;
+              const prevPos = lastHitPos - 1;
+              if (nextPos < GRID_SIZE && !botState.triedPositions.has(nextPos) && opponent.board[nextPos] !== 'hit' && opponent.board[nextPos] !== 'miss') {
+                position = nextPos;
+              } else if (prevPos >= 0 && !botState.triedPositions.has(prevPos) && opponent.board[prevPos] !== 'hit' && opponent.board[prevPos] !== 'miss') {
+                position = prevPos;
+              }
+            }
+
+            // Force misses after sinking
+            if (botState.missShotsAfterSink === 0) {
+              botState.missShotsAfterSink = Math.floor(seededRandom() * 4) + 1; // 1 to 4 misses
+            }
+            if (botState.missShotsAfterSink > 0) {
+              const availableMisses = Array.from({ length: GRID_SIZE }, (_, i) => i)
+                .filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'ship');
+              if (availableMisses.length > 0) {
+                position = availableMisses[Math.floor(seededRandom() * availableMisses.length)];
+                botState.missShotsAfterSink--;
+              }
+            }
           }
         }
       }
 
-      if (!continueLine) {
-        // 50% chance to hit a ship if available
+      if (!currentTarget) {
+        // Find a new target or random shot
         const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
           .filter(pos => !botState.triedPositions.has(pos));
         if (available.length === 0) {
@@ -845,12 +854,11 @@ class SeaBattleGame {
           io.to(this.id).emit('nextTurn', { turn: this.turn });
           return;
         }
+
         const shipCells = available.filter(pos => opponent.board[pos] === 'ship');
-        if (shipCells.length > 0 && seededRandom() < 0.5) {
-          position = shipCells[Math.floor(seededRandom() * shipCells.length)];
-        } else {
-          position = available[Math.floor(seededRandom() * available.length)];
-        }
+        position = shipCells.length > 0 && seededRandom() < BOT_BEHAVIOR.HIT_CHANCE
+          ? shipCells[Math.floor(seededRandom() * shipCells.length)]
+          : available[Math.floor(seededRandom() * available.length)];
       }
 
       botState.triedPositions.add(position);
@@ -859,41 +867,39 @@ class SeaBattleGame {
       if (isHit) {
         opponent.board[position] = 'hit';
         this.shipHits[playerId]++;
-        // If this is a new hit, set up direction logic
-        if (botState.lastHit === null || botState.lastHit === undefined) {
-          botState.firstHit = position;
-          // Try all 4 directions for next time
-          const dirs = [1, -1, GRID_COLS, -GRID_COLS];
-          for (let dir of dirs) {
-            let nextPos = position + dir;
-            if (
-              nextPos >= 0 && nextPos < GRID_SIZE &&
-              !botState.triedPositions.has(nextPos) &&
-              (
-                (dir === 1 || dir === -1) ? Math.floor(nextPos / GRID_COLS) === Math.floor(position / GRID_COLS)
-                : true
-              )
-            ) {
-              botState.direction = dir;
-              break;
-            }
+        botState.lastHit = position;
+
+        const ship = opponent.ships.find(s => s.positions.includes(position));
+        if (ship) {
+          ship.hits++;
+          let target = botState.targets.find(t => t.shipId === ship.name);
+          if (!target) {
+            target = {
+              shipId: ship.name,
+              hits: [position],
+              orientation: null,
+              queue: this._botAdjacents(position, botState),
+              sunk: false
+            };
+            botState.targets.push(target);
+          } else {
+            target.hits.push(position);
+            target.queue = target.queue.filter(p => p !== position);
           }
-        } else {
-          // Continue in the same direction
-          botState.lastHit = position;
+
+          if (target.hits.length >= 2 && !target.orientation) {
+            const [a, b] = target.hits;
+            target.orientation = Math.abs(a - b) === 1 ? 'horizontal' : 'vertical';
+          }
+
+          if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
+            target.sunk = true;
+            this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
+            botState.missShotsAfterSink = Math.floor(seededRandom() * 4) + 1; // Reset to 1-4 misses after sinking
+          }
         }
       } else {
         opponent.board[position] = 'miss';
-        // If missed while continuing, try the other direction next time
-        if (botState.lastHit !== null && botState.direction !== undefined) {
-          // Will try the other direction on next turn
-          botState.lastHit = botState.firstHit;
-          botState.direction = botState.direction === 1 ? -1 : botState.direction === -1 ? 1 : botState.direction === GRID_COLS ? -GRID_COLS : GRID_COLS;
-        } else {
-          botState.lastHit = null;
-          botState.direction = undefined;
-          botState.firstHit = undefined;
-        }
       }
 
       io.to(opponentId).emit('fireResult', { player: playerId, position, hit: isHit });
