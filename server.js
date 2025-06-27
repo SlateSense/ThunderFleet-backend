@@ -950,6 +950,19 @@ class SeaBattleGame {
           if (botState.targets.length > 0) {
             botState.currentTarget = botState.targets[0];
           }
+
+          // Check both sides of the sunk ship in the same orientation
+          const dir = thisTarget.orientation === 'horizontal' ? 1 : GRID_COLS;
+          const sortedHits = [...thisTarget.hits].sort((a, b) => a - b);
+          const firstPos = sortedHits[0] - dir;
+          const lastPos = sortedHits[sortedHits.length - 1] + dir;
+
+          if (firstPos >= 0 && opponent.board[firstPos] === 'water') {
+            this.botFireShotAtPosition(playerId, firstPos);
+          }
+          if (lastPos < GRID_SIZE && opponent.board[lastPos] === 'water') {
+            this.botFireShotAtPosition(playerId, lastPos);
+          }
         } else {
           // If ship not sunk, add adjacent cells to queue
           const adjacents = this._botAdjacents(position, botState);
