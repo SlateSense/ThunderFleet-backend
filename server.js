@@ -1105,11 +1105,7 @@ class SeaBattleGame {
             this.turn = opponentId;
             io.to(this.id).emit('nextTurn', { turn: this.turn });
             if (this.players[this.turn].isBot) {
-              setTimeout(() => {
-                if (this.turn === opponentId && !this.winner) {
-                  this.botFireShot(this.turn);
-                }
-              }, thinkingTime);
+              setTimeout(() => this.botFireShot(this.turn), thinkingTime);
             }
             return;
           }
@@ -1295,13 +1291,13 @@ class SeaBattleGame {
   }
 
   _botTargetAndDestroy(playerId, opponentId, remainingShipCells) {
-    // This function is for the bot's "cheat" mode to finish the game.
-    // It will fire at all known remaining ship cells sequentially using fireShot.
     remainingShipCells.forEach((position, index) => {
       setTimeout(() => {
         if (this.winner) return; // Don't fire if the game has already been won.
-        this.fireShot(playerId, position); // Use main firing logic for proper state updates
-      }, (index + 1) * 1200); // Stagger shots to simulate thinking time
+        
+        this.fireShot(playerId, position);
+
+      }, (index + 1) * 1200); // Stagger the shots to simulate thinking.
     });
   }
 
