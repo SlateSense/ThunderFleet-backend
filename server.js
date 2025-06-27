@@ -907,6 +907,7 @@ class SeaBattleGame {
 
           let target = botState.targets.find(t => t.shipId === ship.name);
           if (!target) {
+            // First hit: add adjacents to queue
             const adjacents = this._botAdjacents(position, botState);
             let adjCount = 1;
             const r = seededRandom();
@@ -924,13 +925,16 @@ class SeaBattleGame {
             };
             botState.targets.push(target);
           } else {
+            // After first hit: only add to hits, and remove from queue if present
             target.hits.push(position);
             target.queue = target.queue.filter(p => p !== position);
-          }
 
-          if (!target.orientation && target.hits.length >= 2) {
-            const [a, b] = target.hits;
-            target.orientation = (Math.abs(a - b) === 1) ? 'horizontal' : 'vertical';
+            // After orientation is known, clear the queue (no more adjacents)
+            if (!target.orientation && target.hits.length >= 2) {
+              const [a, b] = target.hits;
+              target.orientation = (Math.abs(a - b) === 1) ? 'horizontal' : 'vertical';
+              target.queue = []; // Clear adjacents, now only fire in line
+            }
           }
 
           if (ship.hits === ship.size) {
@@ -948,6 +952,12 @@ class SeaBattleGame {
                 io.to(game.id).emit('fireResult', { player: playerId, position: pos, hit: true });
               }
             });
+
+            // After sinking, immediately continue firing if game not over
+            if (game.shipHits[playerId] < game.totalShipCells) {
+              setTimeout(() => game.botFireShot(playerId), thinkingTime);
+              return; // Prevents double nextTurn emit
+            }
           }
         }
 
