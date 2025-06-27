@@ -181,16 +181,16 @@ const PAYOUTS = {
 
 const BOT_JOIN_DELAYS = [13000, 15000, 17000, 19000, 21000, 23000, 25000]; // 13-25 seconds
 const BOT_THINKING_TIME = {
-  MIN: 1000,
-  MAX: 3000
+  MIN: 1000, // Reduced from 2000
+  MAX: 3000  // Reduced from 5000
 };
 const BOT_BEHAVIOR = {
-  HIT_CHANCE: 0.5,
+  HIT_CHANCE: 0.5,            // 50% chance to hit
   ADJACENT_PATTERNS: {
     ONE_ADJACENT: 0,
-    TWO_ADJACENT: 0.30,
-    THREE_ADJACENT: 0.20,
-    INSTANT_SINK: 0.25
+    TWO_ADJACENT: 0.30,       // 30% chance
+    THREE_ADJACENT: 0.20,     // 20% chance
+    INSTANT_SINK: 0.25        // 25% chance
   }
 };
 
@@ -724,15 +724,21 @@ class SeaBattleGame {
     }
   }
 
-  _isValidPosition(pos, botState) {
-    return pos >= 0 && pos < GRID_SIZE && !botState.triedPositions.has(pos);
+  _isValidPosition(pos, botState, opponent) {
+    if (pos < 0 || pos >= GRID_SIZE || botState.triedPositions.has(pos)) {
+      return false;
+    }
+    return true;
   }
 
   _botAdjacents(position, botState) {
     const row = Math.floor(position / GRID_COLS);
     const col = position % GRID_COLS;
     const adjacents = [];
+    const opponentId = Object.keys(this.players).find(id => id !== botState.playerId);
+    const opponent = this.players[opponentId];
 
+    // Check all four directions
     const directions = [
       [-1, 0],  // Up
       [1, 0],   // Down
@@ -743,9 +749,14 @@ class SeaBattleGame {
     for (const [dr, dc] of directions) {
       const newRow = row + dr;
       const newCol = col + dc;
+      
+      // Check if new position is within bounds
       if (newRow >= 0 && newRow < GRID_ROWS && newCol >= 0 && newCol < GRID_COLS) {
         const newPos = newRow * GRID_COLS + newCol;
-        if (this._isValidPosition(newPos, botState)) {
+        
+        // Only add if not already tried and not a miss
+        if (!botState.triedPositions.has(newPos) && 
+            (!opponent || opponent.board[newPos] !== 'miss')) {
           adjacents.push(newPos);
         }
       }
@@ -755,84 +766,157 @@ class SeaBattleGame {
   }
 
   _botNextInLine(target, botState, opponent) {
-    if (!target.hits.length) return null;
+    if (!target || target.hits.length === 0) return null;
 
-    const lastHit = target.hits[target.hits.length - 1];
-    const directions = target.orientation === 'horizontal' ? [1, -1] : [GRID_COLS, -GRID_COLS];
-
-    for (const dir of directions) {
-      let nextPos = lastHit + dir;
-      while (this._isValidPosition(nextPos, botState)) {
-        const row = Math.floor(nextPos / GRID_COLS);
-        const col = nextPos % GRID_COLS;
-        if ((target.orientation === 'horizontal' && row !== Math.floor(lastHit / GRID_COLS)) ||
-            (target.orientation === 'vertical' && col !== lastHit % GRID_COLS)) {
-          break;
-        }
-        if (opponent.board[nextPos] === 'water' || opponent.board[nextPos] === 'ship') {
-          return nextPos;
-        }
-        nextPos += dir;
+    // If we don't know the orientation yet, try to determine it
+    if (!target.orientation && target.hits.length >= 2) {
+      const firstHit = target.hits[0];
+      const lastHit = target.hits[target.hits.length - 1];
+      
+      const firstRow = Math.floor(firstHit / GRID_COLS);
+      const firstCol = firstHit % GRID_COLS;
+      const lastRow = Math.floor(lastHit / GRID_COLS);
+      const lastCol = lastHit % GRID_COLS;
+      
+      if (firstRow === lastRow) {
+        target.orientation = 'horizontal';
+      } else if (firstCol === lastCol) {
+        target.orientation = 'vertical';
       }
     }
+
+    // If we know the orientation, try to find the next cell in line
+    if (target.orientation) {
+      const sortedHits = [...target.hits].sort((a, b) => a - b);
+      const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
+      
+      // Try both ends of the ship
+      const ends = [sortedHits[0], sortedHits[sortedHits.length - 1]];
+      
+      for (const end of ends) {
+        // Check if we can continue in this direction
+        const nextPos = end + (end === sortedHits[0] ? -dir : dir);
+        
+        // Check if next position is valid and not already tried
+        if (
+          nextPos >= 0 && 
+          nextPos < GRID_SIZE && 
+          !botState.triedPositions.has(nextPos) &&
+          // Make sure we stay in the same row (for horizontal) or column (for vertical)
+          (target.orientation === 'horizontal' ? 
+            Math.floor(nextPos / GRID_COLS) === Math.floor(end / GRID_COLS) :
+            (nextPos % GRID_COLS) === (end % GRID_COLS))
+        ) {
+          return nextPos;
+        }
+      }
+    }
+    
+    // If we couldn't find a next position in line, try any adjacent cells
+    const adjacents = [];
+    for (const hit of target.hits) {
+      adjacents.push(...this._botAdjacents(hit, botState));
+    }
+    
+    // Filter out duplicates and already tried positions
+    const uniqueAdjacents = [...new Set(adjacents)].filter(
+      pos => !botState.triedPositions.has(pos) && 
+             (opponent.board[pos] === 'ship' || opponent.board[pos] === 'water')
+    );
+    
+    // If we have any valid adjacent positions, return a random one
+    if (uniqueAdjacents.length > 0) {
+      return uniqueAdjacents[Math.floor(Math.random() * uniqueAdjacents.length)];
+    }
+
+    return null;
+  }
+
+  _botNextAfterSunk(target, botState, opponent) {
+    if (!target.orientation || target.hits.length < 1) return null;
+    
+    const sortedHits = [...target.hits].sort((a, b) => a - b);
+    const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
+    const lastHit = sortedHits[sortedHits.length - 1];
+    const firstHit = sortedHits[0];
+
+    // Try continuing in positive direction
+    let nextPos = lastHit + dir;
+    while (nextPos >= 0 && nextPos < GRID_SIZE) {
+      // Check if we're still in the same row (for horizontal) or column (for vertical)
+      if ((target.orientation === 'horizontal' && 
+           Math.floor(nextPos / GRID_COLS) !== Math.floor(lastHit / GRID_COLS)) ||
+          (target.orientation === 'vertical' && 
+           (nextPos % GRID_COLS) !== (lastHit % GRID_COLS))) {
+        break;
+      }
+      
+      if (!botState.triedPositions.has(nextPos)) {
+        return nextPos;
+      }
+      nextPos += dir;
+    }
+
+    // Try continuing in negative direction
+    nextPos = firstHit - dir;
+    while (nextPos >= 0 && nextPos < GRID_SIZE) {
+      // Check if we're still in the same row (for horizontal) or column (for vertical)
+      if ((target.orientation === 'horizontal' && 
+           Math.floor(nextPos / GRID_COLS) !== Math.floor(firstHit / GRID_COLS)) ||
+          (target.orientation === 'vertical' && 
+           (nextPos % GRID_COLS) !== (firstHit % GRID_COLS))) {
+        break;
+      }
+      
+      if (!botState.triedPositions.has(nextPos)) {
+        return nextPos;
+      }
+      nextPos -= dir;
+    }
+    
     return null;
   }
 
   botFireShot(playerId) {
-    if (this.winner || playerId !== this.turn || !this.players[playerId].isBot) return;
+    try {
+      const game = this;
+      if (!game || game.winner || playerId !== game.turn || !game.players[playerId]?.isBot) return;
 
-    const botState = this.botState[playerId];
-    const opponentId = Object.keys(this.players).find(id => id !== playerId);
-    const opponent = this.players[opponentId];
-    const seededRandom = this.randomGenerators[playerId];
-    const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN) + BOT_THINKING_TIME.MIN);
+      const botState = game.botState[playerId] || game.initBotState(playerId);
+      const opponentId = Object.keys(game.players).find(id => id !== playerId);
+      const opponent = game.players[opponentId];
+      const seededRandom = game.randomGenerators[playerId];
+      const thinkingTime = Math.floor(seededRandom() * (BOT_THINKING_TIME.MAX - BOT_THINKING_TIME.MIN)) + BOT_THINKING_TIME.MIN;
 
-    setTimeout(() => {
-      // Win condition for last few cells
-      const remainingShipCells = opponent.board
-        .map((cell, idx) => cell === 'ship' && !botState.triedPositions.has(idx) ? idx : null)
-        .filter(idx => idx !== null);
-      if (remainingShipCells.length <= 3 && remainingShipCells.length > 0) {
-        this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
-        return;
-      }
+      let position = -1;
+      let hitOccurred = false;
 
-      let position = null;
-      let currentTarget = botState.targets.find(t => !t.sunk && t.hits.length > 0);
-
-      if (currentTarget) {
-        // Continue targeting the current ship
-        if (currentTarget.orientation) {
-          position = this._botNextInLine(currentTarget, botState, opponent);
-        }
-        if (!position && currentTarget.queue.length > 0) {
-          position = currentTarget.queue.shift();
-        }
-        if (!position) {
-          const ship = opponent.ships.find(s => s.name === currentTarget.shipId);
-          position = ship.positions.find(pos => this._isValidPosition(pos, botState));
-          if (!position) {
-            currentTarget.sunk = true; // Mark as sunk if no valid positions remain
-            botState.targets = botState.targets.filter(t => !t.sunk);
-            currentTarget = null;
+      // Prioritize continuing a hit streak
+      if (botState.lastHit !== null) {
+        const directions = [[0, 1], [1, 0], [0, -1], [-1, 0]]; // right, down, left, up
+        for (let [dx, dy] of directions) {
+          const newPos = botState.lastHit + dx + dy * GRID_COLS;
+          if (newPos >= 0 && newPos < GRID_SIZE && !botState.triedPositions.has(newPos)) {
+            position = newPos;
+            break;
           }
         }
       }
 
-      if (!currentTarget) {
-        // Find a new target or random shot
+      // If no adjacent position found, select a random untried position
+      if (position === -1) {
         const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
           .filter(pos => !botState.triedPositions.has(pos));
-        if (available.length === 0) {
-          this.turn = opponentId;
-          io.to(this.id).emit('nextTurn', { turn: this.turn });
+        if (available.length > 0) {
+          position = available[Math.floor(seededRandom() * available.length)];
+        } else {
+          game.turn = opponentId;
+          io.to(game.id).emit('nextTurn', { turn: game.turn });
+          if (game.players[game.turn]?.isBot) {
+            setTimeout(() => game.botFireShot(game.turn), thinkingTime);
+          }
           return;
         }
-
-        const shipCells = available.filter(pos => opponent.board[pos] === 'ship');
-        position = shipCells.length > 0 && seededRandom() < BOT_BEHAVIOR.HIT_CHANCE
-          ? shipCells[Math.floor(seededRandom() * shipCells.length)]
-          : available[Math.floor(seededRandom() * available.length)];
       }
 
       botState.triedPositions.add(position);
@@ -840,77 +924,61 @@ class SeaBattleGame {
 
       if (isHit) {
         opponent.board[position] = 'hit';
-        this.shipHits[playerId]++;
+        game.shipHits[playerId] = (game.shipHits[playerId] || 0) + 1;
         botState.lastHit = position;
+        hitOccurred = true;
 
         const ship = opponent.ships.find(s => s.positions.includes(position));
         if (ship) {
-          ship.hits++;
-          let target = botState.targets.find(t => t.shipId === ship.name);
-          if (!target) {
-            target = {
-              shipId: ship.name,
-              hits: [position],
-              orientation: null,
-              queue: this._botAdjacents(position, botState),
-              sunk: false
-            };
-            botState.targets.push(target);
-          } else {
-            target.hits.push(position);
-            target.queue = target.queue.filter(p => p !== position);
-          }
-
-          if (target.hits.length >= 2 && !target.orientation) {
-            const [a, b] = target.hits;
-            target.orientation = Math.abs(a - b) === 1 ? 'horizontal' : 'vertical';
-          }
-
-          if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
-            target.sunk = true;
-            this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
+          ship.hits = (ship.hits || 0) + 1;
+          if (ship.hits === ship.size) {
+            botState.lastHit = null; // Reset lastHit when a ship is sunk
+            game.botSunkShips[playerId] = (game.botSunkShips[playerId] || 0) + 1;
+            game.humanSunkShips[opponentId] = (game.humanSunkShips[opponentId] || 0) + 1;
           }
         }
       } else {
         opponent.board[position] = 'miss';
+        if (hitOccurred) {
+          botState.lastHit = null; // Reset if miss follows a hit
+        }
       }
 
       io.to(opponentId).emit('fireResult', { player: playerId, position, hit: isHit });
-      io.to(this.id).emit('fireResult', { player: playerId, position, hit: isHit });
+      io.to(game.id).emit('fireResult', { player: playerId, position, hit: isHit });
 
-      if (this.shipHits[playerId] >= this.totalShipCells) {
-        this.endGame(playerId);
-        return;
-      }
-
-      if (isHit) {
-        setTimeout(() => this.botFireShot(playerId), thinkingTime);
+      // Continue firing if a hit occurred, regardless of the ship
+      if (hitOccurred) {
+        setTimeout(() => game.botFireShot(playerId), thinkingTime);
       } else {
-        this.turn = opponentId;
-        io.to(this.id).emit('nextTurn', { turn: this.turn });
-        if (this.players[this.turn].isBot) {
-          setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+        game.turn = opponentId;
+        io.to(game.id).emit('nextTurn', { turn: game.turn });
+        if (game.players[game.turn]?.isBot) {
+          setTimeout(() => game.botFireShot(game.turn), thinkingTime);
         }
       }
-    }, thinkingTime);
+
+      if (game.shipHits[playerId] >= game.totalShipCells) {
+        game.endGame(playerId);
+      }
+    } catch (error) {
+      console.error('Bot error:', error);
+      const opponentId = Object.keys(this.players).find(id => id !== playerId);
+      this.turn = opponentId;
+      io.to(this.id).emit('nextTurn', { turn: this.turn });
+      if (this.players[this.turn]?.isBot) {
+        setTimeout(() => this.botFireShot(this.turn), 1500);
+      }
+    }
   }
 
-  _botTargetAndDestroy(playerId, opponentId, remainingShipCells) {
-    const botState = this.botState[playerId];
-    const opponent = this.players[opponentId];
-    const position = remainingShipCells[0];
-    opponent.board[position] = 'hit';
-    this.shipHits[playerId]++;
-    botState.triedPositions.add(position);
-
-    io.to(opponentId).emit('fireResult', { player: playerId, position, hit: true });
-    io.to(this.id).emit('fireResult', { player: playerId, position, hit: true });
-
-    if (this.shipHits[playerId] >= this.totalShipCells) {
-      this.endGame(playerId);
-    } else {
-      setTimeout(() => this.botFireShot(playerId), Math.floor(Math.random() * 1000) + 1000);
-    }
+  initBotState(playerId) {
+    this.botState[playerId] = {
+      triedPositions: new Set(),
+      lastHit: null,
+      targets: []
+    };
+    return this.botState[playerId];
   }
 
   fireShot(playerId, position) {
@@ -918,7 +986,9 @@ class SeaBattleGame {
 
     const opponentId = Object.keys(this.players).find(id => id !== playerId);
     const opponent = this.players[opponentId];
+    const player = this.players[playerId];
 
+    // Check if position is valid
     if (position < 0 || position >= GRID_SIZE || 
         opponent.board[position] === 'hit' || 
         opponent.board[position] === 'miss') {
@@ -926,34 +996,83 @@ class SeaBattleGame {
     }
 
     const isHit = opponent.board[position] === 'ship';
+    let sunkShip = null;
+    
+    // Update the board
     opponent.board[position] = isHit ? 'hit' : 'miss';
 
+    // Update ship hits if it was a hit
     if (isHit) {
-      this.shipHits[playerId]++;
+      this.shipHits[playerId] = (this.shipHits[playerId] || 0) + 1;
+      
+      // Find and update the ship that was hit
       const ship = opponent.ships.find(s => s.positions.includes(position));
       if (ship) {
-        ship.hits++;
-        if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
+        ship.hits = (ship.hits || 0) + 1;
+        ship.sunk = ship.hits >= ship.positions.length;
+        
+        if (ship.sunk) {
+          console.log(`${ship.name} has been sunk!`);
           this.humanSunkShips[playerId] = (this.humanSunkShips[playerId] || 0) + 1;
+          sunkShip = ship;
         }
       }
     }
 
-    io.to(opponentId).emit('fireResult', { player: playerId, position, hit: isHit });
-    io.to(playerId).emit('fireResult', { player: playerId, position, hit: isHit });
+    // Emit fire result to both players
+    const fireResult = {
+      player: playerId,
+      position,
+      hit: isHit,
+      sunk: !!sunkShip,
+      shipName: sunkShip?.name
+    };
+    
+    io.to(opponentId).emit('fireResult', fireResult);
+    io.to(playerId).emit('fireResult', fireResult);
 
+    // Check for win condition
     if (this.shipHits[playerId] >= this.totalShipCells) {
       this.endGame(playerId);
       return true;
     }
 
+    // If a ship was sunk, make sure all its positions are marked as hit
+    if (sunkShip) {
+      sunkShip.positions.forEach(pos => {
+        if (opponent.board[pos] !== 'hit') {
+          opponent.board[pos] = 'hit';
+          this.shipHits[playerId]++;
+          
+          const sinkUpdate = {
+            player: playerId,
+            position: pos,
+            hit: true,
+            sunk: true,
+            shipName: sunkShip.name
+          };
+          
+          io.to(opponentId).emit('fireResult', sinkUpdate);
+          io.to(playerId).emit('fireResult', sinkUpdate);
+        }
+      });
+    }
+
+    // Switch turns if it was a miss
     if (!isHit) {
       this.turn = opponentId;
       io.to(this.id).emit('nextTurn', { turn: this.turn });
+      
+      // If next player is a bot, let them take their turn
       if (this.players[this.turn].isBot) {
-        setTimeout(() => this.botFireShot(this.turn), Math.floor(Math.random() * 2000) + 1000);
+        const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
+        setTimeout(() => this.botFireShot(this.turn), thinkingTime);
       }
+    } else {
+      // If it was a hit, same player goes again
+      io.to(this.id).emit('nextTurn', { turn: this.turn });
     }
+
     return true;
   }
 
@@ -970,22 +1089,35 @@ class SeaBattleGame {
       const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
       if (this.players[playerId].isBot) {
         humanPlayers.forEach(id => {
-          io.to(id).emit('gameEnd', { message: 'You lost! Better luck next time!' });
+          io.to(id).emit('gameEnd', { 
+            message: 'You lost! Better luck next time!'
+          });
         });
+        console.log(`Bot ${playerId} won the game. Bet amount ${this.betAmount} SATS retained by the house.`);
       } else {
         const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
         console.log('Winner payment sent:', winnerPayment);
-        const platformFee = await sendPayment('slatesense@tryspeed.com', payout.platformFee, 'SATS');
-        console.log('Platform fee sent:', platformFee);
+
+        const winnerFee = payout.winner * 0.01;
+        const platformFee = await sendPayment('slatesense@tryspeed.com', payout.platformFee + winnerFee, 'SATS');
+        console.log('Platform fee (including winner fee) sent:', platformFee);
         humanPlayers.forEach(id => {
           io.to(id).emit('gameEnd', { 
-            message: id === playerId ? `You won! ${payout.winner} sats awarded!` : 'You lost!'
+            message: id === playerId ? `You won! ${payout.winner} sats awarded!` : 'You lost! Better luck next time!'
           });
         });
+        
+        io.to(this.id).emit('transaction', { 
+          message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee + winnerFee} sats total platform fee.`
+        });
+        console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
+        console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
+        console.log(`Platform fee processed: ${payout.platformFee + winnerFee} SATS to slatesense@tryspeed.com`);
       }
     } catch (error) {
       console.error('Payment error:', error.message);
-      io.to(this.id).emit('error', { message: `Payment failed: ${error.message}` });
+      console.log(`Failed to process payment in game ${this.id} for player ${playerId}: ${error.message}`);
+      io.to(this.id).emit('error', { message: `Payment processing failed: ${error.message}` });
     } finally {
       this.cleanup();
     }
@@ -997,61 +1129,199 @@ class SeaBattleGame {
     });
     if (this.matchmakingTimerInterval) {
       clearInterval(this.matchmakingTimerInterval);
+      this.matchmakingTimerInterval = null;
     }
+    Object.keys(this.players).forEach(playerId => {
+      if (!this.players[playerId].isBot) {
+        io.to(playerId).emit('error', { message: 'Game canceled.' });
+      }
+    });
     delete games[this.id];
+    console.log(`Game ${this.id} cleaned up`);
   }
 }
 
 io.on('connection', (socket) => {
   console.log('New connection:', socket.id);
-
+  socket.on('error', (error) => {
+    console.error('Socket error:', error);
+    socket.emit('error', { message: 'An error occurred. Please try again.' });
+  });
+  
   socket.on('joinGame', async ({ lightningAddress, betAmount }) => {
     try {
+      console.log('Join game request:', { lightningAddress, betAmount });
       const validBetAmounts = [300, 500, 1000, 5000, 10000];
       if (!validBetAmounts.includes(betAmount)) {
         throw new Error('Invalid bet amount');
       }
 
+      console.log(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${lightningAddress}`);
+
       players[socket.id] = { lightningAddress, paid: false, betAmount };
+
+      const customerId = 'cus_mbgcu49gfgNyffw9';
       const invoiceData = await createInvoice(
         betAmount,
-        'cus_mbgcu49gfgNyffw9',
+        customerId,
         `Entry fee for Lightning Sea Battle - Player ${socket.id}`
       );
 
+      const lightningInvoice = invoiceData.lightningInvoice;
+      const hostedInvoiceUrl = invoiceData.hostedInvoiceUrl;
+
+      console.log('Payment Request:', { lightningInvoice, hostedInvoiceUrl });
       socket.emit('paymentRequest', {
-        lightningInvoice: invoiceData.lightningInvoice,
-        hostedInvoiceUrl: invoiceData.hostedInvoiceUrl,
+        lightningInvoice: lightningInvoice,
+        hostedInvoiceUrl: hostedInvoiceUrl,
         invoiceId: invoiceData.invoiceId
       });
 
       invoiceToSocket[invoiceData.invoiceId] = socket;
+
+      const paymentTimeout = setTimeout(() => {
+        if (!players[socket.id]?.paid) {
+          socket.emit('error', { message: 'Payment not verified within 5 minutes' });
+          delete players[socket.id];
+          delete invoiceToSocket[invoiceData.invoiceId];
+          console.log(`Payment timeout for player ${socket.id}, invoice ${invoiceData.invoiceId}`);
+        }
+      }, 5 * 60 * 1000);
+
+      socket.on('cancelGame', () => {
+        clearTimeout(paymentTimeout);
+      });
+
+      socket.on('disconnect', () => {
+        clearTimeout(paymentTimeout);
+        delete invoiceToSocket[invoiceData.invoiceId];
+        console.log(`Socket ${socket.id} disconnected, removed from invoiceToSocket`);
+      });
+
+      const game = Object.values(games).find(g => 
+        g.betAmount === betAmount && Object.keys(g.players).length < 2
+      ) || new SeaBattleGame(crypto.randomBytes(16).toString('hex'), betAmount);
+
+      if (!games[game.id]) {
+        games[game.id] = game;
+      }
+
+      const botTimer = setTimeout(() => {
+        if (Object.keys(game.players).length === 1) {
+          const botDelay = BOT_JOIN_DELAYS[
+            Math.floor(Math.random() * BOT_JOIN_DELAYS.length)
+          ];
+          
+          const botId = `bot-${Date.now()}`;
+          game.addPlayer(botId, 'bot@thunderfleet.com', true);
+          game.startMatchmaking();
+        }
+      }, BOT_JOIN_DELAYS[0]);
+
+      game.botTimer = botTimer;
     } catch (error) {
+      console.error('Join game error:', error);
       socket.emit('error', { message: error.message });
     }
   });
 
+  socket.on('cancelGame', ({ gameId, playerId }) => {
+    console.log(`Cancel game request for game ${gameId}, player ${playerId}`);
+    const game = games[gameId];
+    if (game && game.players[playerId]) {
+      game.cleanup();
+      console.log(`Game ${gameId} canceled and cleaned up`);
+    }
+    delete players[playerId];
+  });
+
+  socket.on('updateBoard', ({ playerId, gameId, placements }) => {
+    try {
+      const game = games[gameId];
+      if (game) {
+        game.updateBoard(playerId, placements);
+        socket.emit('updateBoard', { success: true });
+      } else {
+        throw new Error('Game not found');
+      }
+    } catch (error) {
+      console.error('Update board error:', error.message);
+      socket.emit('error', { message: 'Failed to update board: ' + error.message });
+      socket.emit('updateBoard', { success: false });
+    }
+  });
+  
   socket.on('savePlacement', ({ gameId, placements }) => {
-    const game = games[gameId];
-    if (game) game.placeShips(socket.id, placements);
+    try {
+      const game = games[gameId];
+      if (game) {
+        game.placeShips(socket.id, placements);
+      } else {
+        throw new Error('Game not found');
+      }
+    } catch (error) {
+      console.error('Save placement error:', error.message);
+      socket.emit('error', { message: error.message });
+    }
   });
-
+  
   socket.on('fire', ({ gameId, position }) => {
-    const game = games[gameId];
-    if (game) game.fireShot(socket.id, position);
+    try {
+      const game = games[gameId];
+      if (game) {
+        game.fireShot(socket.id, position);
+      } else {
+        throw new Error('Game not found');
+      }
+    } catch (error) {
+      console.error('Fire shot error:', error.message);
+      socket.emit('error', { message: 'Failed to fire shot: ' + error.message });
+    }
   });
-
+  
   socket.on('disconnect', () => {
     console.log('Disconnected:', socket.id);
     Object.values(games).forEach(game => {
       if (game.players[socket.id]) {
+        const opponentId = Object.keys(game.players).find(id => id !== socket.id);
+        if (opponentId && !game.winner) {
+          io.to(opponentId).emit('gameEnd', { 
+            message: 'Player disconnected'
+          });
+        }
         delete game.players[socket.id];
+        
+        if (game.placementTimers[socket.id]) {
+          clearTimeout(game.placementTimers[socket.id]);
+          delete game.placementTimers[socket.id];
+        }
+
+        if (game.matchmakingTimerInterval) {
+          clearInterval(game.matchmakingTimerInterval);
+          game.matchmakingTimerInterval = null;
+        }
+
         if (Object.keys(game.players).length === 0) {
           delete games[game.id];
+          console.log(`Game ${game.id} deleted as no players remain`);
         }
       }
     });
     delete players[socket.id];
+  });
+
+  socket.on('clearBoard', ({ gameId }) => {
+    const game = games[gameId];
+    if (game && game.players[socket.id] && !game.players[socket.id].isBot) {
+      game.players[socket.id].board = Array(GRID_SIZE).fill('water');
+      game.players[socket.id].ships = [];
+      game.players[socket.id].ready = false;
+      io.to(socket.id).emit('games', {
+        count: Object.values(game.players).filter(p => p.ready).length,
+        grid: game.players[socket.id].board,
+        ships: game.players[socket.id].ships
+      });
+    }
   });
 });
 
