@@ -1110,7 +1110,13 @@ class SeaBattleGame {
             return;
           }
 
-          position = available[Math.floor(seededRandom() * available.length)];
+          // Adjust hit probability to behave more like a human
+          const hitProbability = 0.6; // 60% chance to hit
+          if (availableShips.length > 0 && seededRandom() < hitProbability) {
+            position = availableShips[Math.floor(seededRandom() * availableShips.length)];
+          } else {
+            position = available[Math.floor(seededRandom() * available.length)];
+          }
         }
 
         // Fire at the determined position
