@@ -790,16 +790,6 @@ class SeaBattleGame {
       }
     }
 
-    const adjacents = [];
-    for (const hit of target.hits) {
-      adjacents.push(...this._botAdjacents(hit, botState));
-    }
-
-    const uniqueAdjacents = [...new Set(adjacents)].filter(pos => !botState.triedPositions.has(pos));
-    if (uniqueAdjacents.length > 0) {
-      return uniqueAdjacents[Math.floor(seededRandom() * uniqueAdjacents.length)];
-    }
-
     return null;
   }
 
@@ -852,43 +842,50 @@ class SeaBattleGame {
       let position = -1;
       let hitOccurred = false;
 
-      // Prioritize continuing a hit streak
-      if (botState.lastHit !== null) {
-        const adjacents = this._botAdjacents(botState.lastHit, botState);
-        let adjCount = 1;
-        const r = seededRandom();
-        if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.INSTANT_SINK) adjCount = adjacents.length;
-        else if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.THREE_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.INSTANT_SINK) adjCount = 3;
-        else if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.TWO_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.THREE_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.INSTANT_SINK) adjCount = 2;
-        const adjSubset = adjacents.slice(0, Math.min(adjCount, adjacents.length));
-        if (adjSubset.length > 0) {
-          position = adjSubset[0];
+      // Prioritize continuing a hit streak or targeting a known ship
+      if (botState.lastHit !== null || botState.currentTarget) {
+        let currentTarget = botState.targets.find(t => t.shipId === botState.currentTarget && !t.sunk);
+        if (currentTarget) {
+          position = this._botNextInLine(currentTarget, botState, opponent, seededRandom);
+          if (position === null && currentTarget.hits.length < opponent.ships.find(s => s.name === currentTarget.shipId).size) {
+            // Try adjacent only if orientation is not yet determined (first hit)
+            if (!currentTarget.orientation && currentTarget.hits.length === 1 && currentTarget.adjacentTried !== true) {
+              const adjacents = this._botAdjacents(botState.lastHit, botState);
+              let adjCount = 1;
+              const r = seededRandom();
+              if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.INSTANT_SINK) adjCount = adjacents.length;
+              else if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.THREE_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.INSTANT_SINK) adjCount = 3;
+              else if (r < BOT_BEHAVIOR.ADJACENT_PATTERNS.TWO_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.THREE_ADJACENT + BOT_BEHAVIOR.ADJACENT_PATTERNS.INSTANT_SINK) adjCount = 2;
+              const adjSubset = adjacents.slice(0, Math.min(adjCount, adjacents.length));
+              if (adjSubset.length > 0) {
+                position = adjSubset[0];
+                currentTarget.adjacentTried = true; // Mark adjacent as tried for this target
+              }
+            }
+          }
+        }
+
+        if (position === -1 && botState.lastHit !== null) {
+          const adjacents = this._botAdjacents(botState.lastHit, botState);
+          if (adjacents.length > 0) {
+            position = adjacents[0]; // Use first adjacent if no target progress
+          }
         }
       }
 
-      // If no adjacent position or not in hit mode, select based on current target or random
+      // If no target or adjacent available, pick a new random position
       if (position === -1) {
-        let currentTarget = botState.targets.find(t => !t.sunk && t.hits.length > 0);
-        if (currentTarget) {
-          position = this._botNextInLine(currentTarget, botState, opponent, seededRandom);
-          if (position === null && currentTarget.queue.length > 0) {
-            position = currentTarget.queue.shift();
+        const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
+          .filter(pos => !botState.triedPositions.has(pos));
+        if (available.length > 0) {
+          position = available[Math.floor(seededRandom() * available.length)];
+        } else {
+          game.turn = opponentId;
+          io.to(game.id).emit('nextTurn', { turn: game.turn });
+          if (game.players[game.turn]?.isBot) {
+            setTimeout(() => game.botFireShot(game.turn), thinkingTime);
           }
-        }
-
-        if (position === -1) {
-          const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
-            .filter(pos => !botState.triedPositions.has(pos));
-          if (available.length > 0) {
-            position = available[Math.floor(seededRandom() * available.length)];
-          } else {
-            game.turn = opponentId;
-            io.to(game.id).emit('nextTurn', { turn: game.turn });
-            if (game.players[game.turn]?.isBot) {
-              setTimeout(() => game.botFireShot(game.turn), thinkingTime);
-            }
-            return;
-          }
+          return;
         }
       }
 
@@ -900,6 +897,7 @@ class SeaBattleGame {
         game.shipHits[playerId] = (game.shipHits[playerId] || 0) + 1;
         hitOccurred = true;
         botState.hitMode = true;
+        botState.lastHit = position; // Update lastHit to continue streak
 
         let ship = opponent.ships.find(s => s.positions.includes(position));
         if (ship) {
@@ -919,18 +917,18 @@ class SeaBattleGame {
               shipId: ship.name,
               hits: [position],
               orientation: null,
+              adjacentTried: false,
               queue: adjSubset,
               sunk: false
             };
             botState.targets.push(target);
+            botState.currentTarget = ship.name;
           } else {
             target.hits.push(position);
-            target.queue = target.queue.filter(p => p !== position);
-          }
-
-          if (!target.orientation && target.hits.length >= 2) {
-            const [a, b] = target.hits;
-            target.orientation = (Math.abs(a - b) === 1) ? 'horizontal' : 'vertical';
+            if (!target.orientation && target.hits.length >= 2) {
+              const [a, b] = target.hits;
+              target.orientation = (Math.abs(a - b) === 1) ? 'horizontal' : 'vertical';
+            }
           }
 
           if (ship.hits === ship.size) {
@@ -948,13 +946,15 @@ class SeaBattleGame {
                 io.to(game.id).emit('fireResult', { player: playerId, position: pos, hit: true });
               }
             });
+            // Move to next unsunk target if streak continues
+            const nextTarget = botState.targets.find(t => !t.sunk && t.hits.length > 0);
+            if (nextTarget) {
+              botState.currentTarget = nextTarget.shipId;
+              botState.lastHit = nextTarget.hits[nextTarget.hits.length - 1];
+            } else {
+              botState.lastHit = null; // Reset if no more targets
+            }
           }
-        }
-
-        // Update or set current target
-        if (!botState.currentTarget || botState.targets.find(t => t.shipId === botState.currentTarget)?.sunk) {
-          const nextTarget = botState.targets.find(t => !t.sunk && t.hits.length > 0);
-          if (nextTarget) botState.currentTarget = nextTarget.shipId;
         }
       } else {
         opponent.board[position] = 'miss';
@@ -967,7 +967,7 @@ class SeaBattleGame {
       io.to(game.id).emit('fireResult', { player: playerId, position, hit: isHit });
 
       // Continue streak if hit occurred
-      if (hitOccurred) {
+      if (hitOccurred && botState.currentTarget) {
         setTimeout(() => game.botFireShot(playerId), thinkingTime);
       } else {
         game.turn = opponentId;
