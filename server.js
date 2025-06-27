@@ -1122,6 +1122,10 @@ class SeaBattleGame {
         // Fire at the determined position
         if (position !== null) {
           this.botFireShotAtPosition(playerId, position);
+          // Continue firing until a miss or edge
+          if (opponent.board[position] === 'hit') {
+            setTimeout(() => this.botFireShot(playerId), Math.floor(seededRandom() * 1000) + 500);
+          }
         }
       }, thinkingTime);
     } catch (error) {
