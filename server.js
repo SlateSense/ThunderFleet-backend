@@ -1105,7 +1105,11 @@ class SeaBattleGame {
             this.turn = opponentId;
             io.to(this.id).emit('nextTurn', { turn: this.turn });
             if (this.players[this.turn].isBot) {
-              setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+              setTimeout(() => {
+                if (this.turn === opponentId && !this.winner) {
+                  this.botFireShot(this.turn);
+                }
+              }, thinkingTime);
             }
             return;
           }
@@ -1127,7 +1131,7 @@ class SeaBattleGame {
             this.turn = opponentId;
             io.to(this.id).emit('nextTurn', { turn: this.turn });
             if (this.players[this.turn].isBot) {
-              setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+              setTimeout(() => this.botFireShot(this.turn), 1500);
             }
             return;
           }
@@ -1291,26 +1295,14 @@ class SeaBattleGame {
   }
 
   _botTargetAndDestroy(playerId, opponentId, remainingShipCells) {
-    const botState = this.botState[playerId];
-    const opponent = this.players[opponentId];
-    const position = remainingShipCells[0];
-    opponent.board[position] = 'hit';
-    this.shipHits[playerId]++;
-    botState.triedPositions.add(position);
-
-    io.to(opponentId).emit('fireResult', {
-      player: playerId,
-      position,
-      hit: true
+    // This function is for the bot's "cheat" mode to finish the game.
+    // It will fire at all known remaining ship cells sequentially using fireShot.
+    remainingShipCells.forEach((position, index) => {
+      setTimeout(() => {
+        if (this.winner) return; // Don't fire if the game has already been won.
+        this.fireShot(playerId, position); // Use main firing logic for proper state updates
+      }, (index + 1) * 1200); // Stagger shots to simulate thinking time
     });
-
-    if (this.shipHits[playerId] >= this.totalShipCells) {
-      this.endGame(playerId);
-      return;
-    }
-
-    setTimeout(() => this.botFireShot(playerId), Math.floor(Math.random() * 1000) + 1000);
-    io.to(this.id).emit('nextTurn', { turn: this.turn });
   }
 
   initBotState(playerId) {
