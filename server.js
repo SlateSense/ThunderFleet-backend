@@ -1126,7 +1126,7 @@ class SeaBattleGame {
             return;
           }
 
-          const hitProbability = 0.6;
+          const hitProbability = 0.35;
           if (availableShips.length > 0 && seededRandom() < hitProbability) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
