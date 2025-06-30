@@ -938,39 +938,33 @@ class SeaBattleGame {
           if (thisTarget.orientation) {
             const dir = thisTarget.orientation === 'horizontal' ? 1 : GRID_COLS;
             const sortedHits = [...thisTarget.hits].sort((a, b) => a - b);
+            const seededRandom = this.randomGenerators[playerId];
 
-            // Forward direction
-            let next = sortedHits[sortedHits.length - 1] + dir;
-            while (
-              next >= 0 && next < GRID_SIZE &&
-              !botState.triedPositions.has(next) &&
-              ((dir === 1) ? Math.floor(next / GRID_COLS) === Math.floor(sortedHits[sortedHits.length - 1] / GRID_COLS)
-               : (next % GRID_COLS) === (sortedHits[sortedHits.length - 1] % GRID_COLS))
-            ) {
-              if (opponent.board[next] === 'ship') {
-                // Fire at next and continue chain
-                this.botFireShotAtPosition(playerId, next, dir, true);
-                return;
-              } else {
-                break;
+            // Helper to check one direction
+            const tryDirection = (start, step) => {
+              let next = start + step;
+              while (
+                next >= 0 && next < GRID_SIZE &&
+                !botState.triedPositions.has(next) &&
+                ((step === 1) ? Math.floor(next / GRID_COLS) === Math.floor(start / GRID_COLS)
+                 : (next % GRID_COLS) === (start % GRID_COLS))
+              ) {
+                // Only fire if it's a ship and with 50% probability
+                if (opponent.board[next] === 'ship' && seededRandom() < 0.5) {
+                  this.botFireShotAtPosition(playerId, next, step, true);
+                  return true; // Stop after one streak in this direction
+                } else {
+                  break;
+                }
               }
-            }
+              return false;
+            };
 
-            // Backward direction
-            next = sortedHits[0] - dir;
-            while (
-              next >= 0 && next < GRID_SIZE &&
-              !botState.triedPositions.has(next) &&
-              ((dir === 1) ? Math.floor(next / GRID_COLS) === Math.floor(sortedHits[0] / GRID_COLS)
-               : (next % GRID_COLS) === (sortedHits[0] % GRID_COLS))
-            ) {
-              if (opponent.board[next] === 'ship') {
-                // Fire at next and continue chain
-                this.botFireShotAtPosition(playerId, next, -dir, true);
-                return;
-              } else {
-                break;
-              }
+            // Try forward direction
+            const didStreakForward = tryDirection(sortedHits[sortedHits.length - 1], dir);
+            // Try backward direction (only if forward didn't streak)
+            if (!didStreakForward) {
+              tryDirection(sortedHits[0], -dir);
             }
           }
         } else {
@@ -1126,7 +1120,7 @@ class SeaBattleGame {
             return;
           }
 
-          const hitProbability = 0.35;
+          const hitProbability = 0.;
           if (availableShips.length > 0 && seededRandom() < hitProbability) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
