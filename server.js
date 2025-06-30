@@ -874,17 +874,17 @@ class SeaBattleGame {
     return null;
   }
 
-  botFireShotAtPosition(playerId, position) {
+  botFireShotAtPosition(playerId, position, direction = null, chainMode = false) {
     if (this.winner || playerId !== this.turn || !this.players[playerId].isBot) return;
 
     const opponentId = Object.keys(this.players).find(id => id !== playerId);
     const opponent = this.players[opponentId];
     const botState = this.botState[playerId];
-    
+
     botState.triedPositions.add(position);
-    
+
     const isHit = opponent.board[position] === 'ship';
-    
+
     if (isHit) {
       opponent.board[position] = 'hit';
       this.shipHits[playerId]++;
@@ -893,7 +893,7 @@ class SeaBattleGame {
       const ship = opponent.ships.find(s => s.positions.includes(position));
       if (ship) {
         let thisTarget = botState.targets.find(t => t.shipId === ship.name && !t.sunk);
-        
+
         if (!thisTarget) {
           thisTarget = {
             shipId: ship.name,
@@ -909,11 +909,11 @@ class SeaBattleGame {
         } else {
           thisTarget.hits.push(position);
           thisTarget.lastHit = position;
-          
+
           if (thisTarget.hits.length >= 2 && !thisTarget.orientation) {
             const firstHit = thisTarget.hits[0];
             const secondHit = thisTarget.hits[1];
-            
+
             if (Math.floor(firstHit / GRID_COLS) === Math.floor(secondHit / GRID_COLS)) {
               thisTarget.orientation = 'horizontal';
             } else {
@@ -922,35 +922,64 @@ class SeaBattleGame {
           }
         }
 
+        // If ship is sunk, mark as sunk
         if (ship.positions.every(pos => opponent.board[pos] === 'hit')) {
           thisTarget.sunk = true;
           this.botSunkShips[playerId] = (this.botSunkShips[playerId] || 0) + 1;
-          
+
+          // Remove sunk target from current
           if (botState.currentTarget && botState.currentTarget.shipId === ship.name) {
             botState.currentTarget = null;
           }
-          
           botState.targets = botState.targets.filter(t => !t.sunk);
-          
-          if (botState.targets.length > 0) {
-            botState.currentTarget = botState.targets[0];
-          }
 
-          const dir = thisTarget.orientation === 'horizontal' ? 1 : GRID_COLS;
-          const sortedHits = [...thisTarget.hits].sort((a, b) => a - b);
-          const firstPos = sortedHits[0] - dir;
-          const lastPos = sortedHits[sortedHits.length - 1] + dir;
+          // --- CHAIN DESTRUCTION LOGIC ---
+          // If orientation is known, keep firing in both directions until water/edge/already tried
+          if (thisTarget.orientation) {
+            const dir = thisTarget.orientation === 'horizontal' ? 1 : GRID_COLS;
+            const sortedHits = [...thisTarget.hits].sort((a, b) => a - b);
 
-          if (firstPos >= 0 && opponent.board[firstPos] === 'water') {
-            this.botFireShotAtPosition(playerId, firstPos);
-          }
-          if (lastPos < GRID_SIZE && opponent.board[lastPos] === 'water') {
-            this.botFireShotAtPosition(playerId, lastPos);
+            // Forward direction
+            let next = sortedHits[sortedHits.length - 1] + dir;
+            while (
+              next >= 0 && next < GRID_SIZE &&
+              !botState.triedPositions.has(next) &&
+              ((dir === 1) ? Math.floor(next / GRID_COLS) === Math.floor(sortedHits[sortedHits.length - 1] / GRID_COLS)
+               : (next % GRID_COLS) === (sortedHits[sortedHits.length - 1] % GRID_COLS))
+            ) {
+              if (opponent.board[next] === 'ship') {
+                // Fire at next and continue chain
+                this.botFireShotAtPosition(playerId, next, dir, true);
+                return;
+              } else {
+                break;
+              }
+            }
+
+            // Backward direction
+            next = sortedHits[0] - dir;
+            while (
+              next >= 0 && next < GRID_SIZE &&
+              !botState.triedPositions.has(next) &&
+              ((dir === 1) ? Math.floor(next / GRID_COLS) === Math.floor(sortedHits[0] / GRID_COLS)
+               : (next % GRID_COLS) === (sortedHits[0] % GRID_COLS))
+            ) {
+              if (opponent.board[next] === 'ship') {
+                // Fire at next and continue chain
+                this.botFireShotAtPosition(playerId, next, -dir, true);
+                return;
+              } else {
+                break;
+              }
+            }
           }
         } else {
-          const adjacents = this._botAdjacents(position, botState);
-          thisTarget.queue = [...new Set([...thisTarget.queue, ...adjacents])]
-            .filter(pos => !botState.triedPositions.has(pos));
+          // If not sunk, add adjacents to queue (only after first hit)
+          if (thisTarget.hits.length === 1) {
+            const adjacents = this._botAdjacents(position, botState);
+            thisTarget.queue = [...new Set([...thisTarget.queue, ...adjacents])]
+              .filter(pos => !botState.triedPositions.has(pos));
+          }
         }
       } else {
         console.warn('No ship found for the hit position:', position);
@@ -971,9 +1000,15 @@ class SeaBattleGame {
       hit: isHit
     });
 
-    if (isHit) {
+    if (this.shipHits[playerId] >= this.totalShipCells) {
+      this.endGame(playerId);
+      return;
+    }
+
+    // If chainMode, do not streak again (already handled)
+    if (isHit && !chainMode) {
       setTimeout(() => this.botFireShot(playerId), Math.floor(Math.random() * 1000) + 500);
-    } else {
+    } else if (!isHit) {
       this.turn = opponentId;
       io.to(this.id).emit('nextTurn', { turn: this.turn });
       if (this.players[this.turn].isBot) {
