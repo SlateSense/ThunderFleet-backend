@@ -409,7 +409,7 @@ class SeaBattleGame {
     this.bets[playerId] = false;
     this.payments[playerId] = false;
     this.shipHits[playerId] = 0;
-    this.placementConfirmed[playerId] = false;
+    this.placementConfirmed[playerId] = false; // Initialize placement confirmation
     const seed = playerId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) + Date.now();
     this.randomGenerators[playerId] = mulberry32(seed);
 
@@ -429,12 +429,18 @@ class SeaBattleGame {
         gameId: this.id, 
         playerId: playerId 
       });
-      
-      // Only start matchmaking if this is the first player
-      if (Object.keys(this.players).length === 1) {
-        this.startMatchmaking();
+    }
+
+    if (Object.keys(this.players).length === 2) {
+      if (this.matchmakingTimerInterval) {
+        clearInterval(this.matchmakingTimerInterval);
+        this.matchmakingTimerInterval = null;
       }
-      // Don't automatically start placing - wait for server to send startPlacing
+      setTimeout(() => {
+        this.startPlacing();
+      }, 500);
+    } else {
+      this.startMatchmaking();
     }
   }
 
@@ -572,6 +578,14 @@ class SeaBattleGame {
         if (pos < 0 || pos >= gridSize) {
           throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
         }
+        const row = Math.floor(pos / cols);
+        const col = pos % cols;
+        if (isHorizontal && (i > 0 && col !== ship.positions[i - 1] % cols + 1)) {
+          throw new Error(`Invalid horizontal alignment for ${ship.name} at position ${pos}`);
+        }
+        if (!isHorizontal && (i > 0 && row !== Math.floor(ship.positions[i - 1] / cols) + 1)) {
+          throw new Error(`Invalid vertical alignment for ${ship.name} at position ${pos}`);
+        }
         if (occupied.has(pos)) {
           throw new Error(`Position ${pos} already occupied for ${ship.name}`);
         }
@@ -583,18 +597,20 @@ class SeaBattleGame {
     player.ships = [];
 
     placements.forEach(ship => {
-      ship.positions.forEach(pos => {
-        if (pos >= 0 && pos < gridSize) {
-          player.board[pos] = 'ship';
-        }
-      });
-      player.ships.push({
-        name: ship.name,
-        positions: ship.positions,
-        horizontal: ship.horizontal,
-        sunk: false,
-        hits: 0
-      });
+      if (ship.positions && Array.isArray(ship.positions)) {
+        ship.positions.forEach(pos => {
+          if (pos >= 0 && pos < gridSize) {
+            player.board[pos] = 'ship';
+          }
+        });
+        player.ships.push({
+          name: ship.name,
+          positions: ship.positions,
+          horizontal: ship.horizontal,
+          sunk: false,
+          hits: 0
+        });
+      }
     });
 
     io.to(playerId).emit('games', { 
@@ -1343,17 +1359,17 @@ io.on('connection', (socket) => {
         games[game.id] = game;
       }
 
+      const botDelay = BOT_JOIN_DELAYS[
+        Math.floor(Math.random() * BOT_JOIN_DELAYS.length)
+      ];
+
       const botTimer = setTimeout(() => {
         if (Object.keys(game.players).length === 1) {
-          const botDelay = BOT_JOIN_DELAYS[
-            Math.floor(Math.random() * BOT_JOIN_DELAYS.length)
-          ];
-          
           const botId = `bot-${Date.now()}`;
           game.addPlayer(botId, 'bot@thunderfleet.com', true);
-          game.startMatchmaking();
+          // Do NOT call game.startMatchmaking() here!
         }
-      }, BOT_JOIN_DELAYS[0]);
+      }, botDelay);
 
       game.botTimer = botTimer;
     } catch (error) {
