@@ -1081,20 +1081,15 @@ class SeaBattleGame {
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
           const availableShips = available.filter(pos => opponent.board[pos] === 'ship');
-        
-          if (available.length === 0) {
-            this.turn = opponentId;
-            io.to(this.id).emit('nextTurn', { turn: this.turn });
-            if (this.players[this.turn].isBot) {
-              setTimeout(() => this.botFireShot(this.turn), Math.floor(seededRandom() * 2000) + 1000);
-            }
-            return;
-          }
 
-          const hitProbability = 0.6;
-          if (availableShips.length > 0 && seededRandom() < hitProbability) {
+          const botSunk = this.botSunkShips[playerId] || 0;
+          const humanSunk = this.humanSunkShips[opponentId] || 0;
+
+          // Always win logic: if bot is behind or endgame, cheat
+          if (this.shouldBotCheatToWin(playerId, opponentId) && availableShips.length > 0) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
+            // Otherwise, fire randomly
             position = available[Math.floor(seededRandom() * available.length)];
           }
         }
@@ -1227,6 +1222,20 @@ class SeaBattleGame {
     }
 
     return true;
+  }
+
+  shouldBotCheatToWin(playerId, opponentId) {
+    // Bot cheats if human is ahead, or if either player is close to winning
+    const botSunk = this.botSunkShips[playerId] || 0;
+    const humanSunk = this.humanSunkShips[opponentId] || 0;
+    const botHits = this.shipHits[playerId] || 0;
+    const humanHits = this.shipHits[opponentId] || 0;
+    // Bot cheats if human is ahead, or if 3 or fewer ship cells remain for either player
+    return (
+      humanSunk > botSunk ||
+      (this.totalShipCells - botHits <= 3) ||
+      (this.totalShipCells - humanHits <= 3)
+    );
   }
 
   async endGame(playerId) {
