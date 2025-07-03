@@ -199,11 +199,11 @@ const GRID_ROWS = 7;
 const GRID_SIZE = GRID_COLS * GRID_ROWS;
 const PLACEMENT_TIME = 45;
 const SHIP_CONFIG = [
-  { name: 'Patrol Boat', size: 2 },
-  { name: 'Destroyer', size: 3 },
-  { name: 'Submarine', size: 3 },
-  { name: 'Battleship', size: 4 },
   { name: 'Aircraft Carrier', size: 5 },
+  { name: 'Battleship', size: 4 },
+  { name: 'Submarine', size: 3 },
+  { name: 'Destroyer', size: 3 },
+  { name: 'Patrol Boat', size: 2 }
 ];
 
 const games = {};
