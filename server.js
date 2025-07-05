@@ -438,7 +438,7 @@ class SeaBattleGame {
       }
       setTimeout(() => {
         this.startPlacing();
-      }, 500);
+      }, 2000); // Increased from 500ms to 2000ms
     } else {
       this.startMatchmaking();
     }
