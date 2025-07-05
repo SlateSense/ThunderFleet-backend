@@ -199,11 +199,11 @@ const GRID_ROWS = 7;
 const GRID_SIZE = GRID_COLS * GRID_ROWS;
 const PLACEMENT_TIME = 45;
 const SHIP_CONFIG = [
-  { name: 'Aircraft Carrier', size: 5 },
-  { name: 'Battleship', size: 4 },
-  { name: 'Submarine', size: 3 },
-  { name: 'Destroyer', size: 3 },
-  { name: 'Patrol Boat', size: 2 }
+  { name: 'Small Ship', size: 3 },    // Column 1
+  { name: 'Tiny Ship', size: 2 },     // Column 1
+  { name: 'Medium Ship', size: 4 },   // Column 2
+  { name: 'Medium Ship 2', size: 4 }, // Column 2
+  { name: 'Short Ship', size: 3 }     // Column 2
 ];
 
 const games = {};
@@ -495,25 +495,32 @@ class SeaBattleGame {
     
     const seededRandom = this.randomGenerators[playerId];
     
-    SHIP_CONFIG.forEach(shipConfig => {
+    // Define column boundaries: Column 1 (cols 0-4), Column 2 (cols 5-8)
+    const column1Ships = [
+      { name: 'Small Ship', size: 3 },
+      { name: 'Tiny Ship', size: 2 }
+    ];
+    const column2Ships = [
+      { name: 'Medium Ship', size: 4 },
+      { name: 'Medium Ship 2', size: 4 },
+      { name: 'Short Ship', size: 3 }
+    ];
+
+    // Place ships in Column 1 (cols 0-4)
+    column1Ships.forEach(shipConfig => {
       let placed = false;
       let attempts = 0;
       
       while (!placed && attempts < 100) {
         attempts++;
-        const horizontal = seededRandom() > 0.5;
         const row = Math.floor(seededRandom() * rows);
-        const col = Math.floor(seededRandom() * cols);
+        const col = Math.floor(seededRandom() * 5); // Restrict to cols 0-4
         const positions = [];
         let valid = true;
         
         for (let i = 0; i < shipConfig.size; i++) {
-          const pos = horizontal ? row * cols + col + i : (row + i) * cols + col;
-          
-          if (pos >= gridSize || 
-              (horizontal && col + shipConfig.size > cols) || 
-              (!horizontal && row + shipConfig.size > rows) || 
-              occupied.has(pos)) {
+          const pos = row * cols + col + i;
+          if (pos >= gridSize || Math.floor(pos % cols) >= 5 || occupied.has(pos)) {
             valid = false;
             break;
           }
@@ -525,7 +532,42 @@ class SeaBattleGame {
           placements.push({
             name: shipConfig.name,
             positions,
-            horizontal,
+            horizontal: true,
+            sunk: false,
+            hits: 0
+          });
+          placed = true;
+        }
+      }
+    });
+
+    // Place ships in Column 2 (cols 5-8)
+    column2Ships.forEach(shipConfig => {
+      let placed = false;
+      let attempts = 0;
+      
+      while (!placed && attempts < 100) {
+        attempts++;
+        const row = Math.floor(seededRandom() * rows);
+        const col = 5 + Math.floor(seededRandom() * 4); // Restrict to cols 5-8
+        const positions = [];
+        let valid = true;
+        
+        for (let i = 0; i < shipConfig.size; i++) {
+          const pos = row * cols + col + i;
+          if (pos >= gridSize || Math.floor(pos % cols) < 5 || occupied.has(pos)) {
+            valid = false;
+            break;
+          }
+          positions.push(pos);
+        }
+        
+        if (valid) {
+          positions.forEach(pos => occupied.add(pos));
+          placements.push({
+            name: shipConfig.name,
+            positions,
+            horizontal: true,
             sunk: false,
             hits: 0
           });
