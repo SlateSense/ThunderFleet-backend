@@ -209,38 +209,6 @@ const SHIP_CONFIG = [
 const games = {};
 const players = {};
 
-async function decodeAndFetchLnUrl(lnUrl) {
-  try {
-    console.log('Decoding LN-URL:', lnUrl);
-    const { words } = bech32.decode(lnUrl, 2000);
-    const decoded = bech32.fromWords(words);
-    const url = Buffer.from(decoded).toString('utf8');
-    console.log('Decoded LN-URL to URL:', url);
-
-    const response = await axios.get(url, { timeout: 5000 });
-    console.log('LN-URL response:', response.data);
-
-    if (response.data.tag !== 'payRequest') {
-      throw new Error('LN-URL response is not a payRequest');
-    }
-
-    const callbackUrl = response.data.callback;
-    const amountMsats = response.data.minSendable;
-
-    const callbackResponse = await axios.get(`${callbackUrl}?amount=${amountMsats}`, { timeout: 5000 });
-    console.log('Callback response:', callbackResponse.data);
-
-    if (!callbackResponse.data.pr) {
-      throw new Error('No BOLT11 invoice in callback response');
-    }
-
-    return callbackResponse.data.pr;
-  } catch (error) {
-    console.error('LN-URL processing error:', error.message);
-    throw new Error(`Failed to process LN-URL: ${error.message}`);
-  }
-}
-
 async function createInvoice(amountSats, customerId, description) {
   try {
     console.log('Creating invoice with params:', { amountSats, customerId, description });
@@ -306,16 +274,8 @@ async function createInvoice(amountSats, customerId, description) {
                           invoiceData.lightning || 
                           invoiceData.ln_invoice;
 
-    if (lightningInvoice && lightningInvoice.toLowerCase().startsWith('lnurl1')) {
-      console.log('Detected LN-URL in payment_request:', lightningInvoice);
-      lightningInvoice = await decodeAndFetchLnUrl(lightningInvoice);
-      console.log('Fetched BOLT11 invoice from LN-URL:', lightningInvoice);
-    }
-
     if (!lightningInvoice) {
       console.warn('No Lightning invoice found in response. Falling back to hosted_invoice_url.');
-      console.warn('Available fields:', Object.keys(invoiceData));
-      console.warn('Full invoice data for inspection:', invoiceData);
       lightningInvoice = invoiceData.hosted_invoice_url;
     } else {
       console.log('Found Lightning invoice:', lightningInvoice);
@@ -339,65 +299,26 @@ async function createInvoice(amountSats, customerId, description) {
   }
 }
 
-async function resolveLightningAddress(address, amountSats) {
-  try {
-    const [username, domain] = address.split('@');
-    if (!username || !domain) {
-      throw new Error('Invalid Lightning address');
-    }
-
-    const lnurl = `https://${domain}/.well-known/lnurlp/${username}`;
-    console.log('Fetching LNURL metadata from:', lnurl);
-
-    const metadataResponse = await axios.get(lnurl, { timeout: 5000 });
-    const metadata = metadataResponse.data;
-
-    if (metadata.tag !== 'payRequest') {
-      throw new Error('Invalid LNURL metadata: not a payRequest');
-    }
-
-    const callback = metadata.callback;
-    const amountMsats = amountSats * 1000; // Convert satoshis to millisatoshis
-    console.log('Requesting invoice from:', callback, 'with amount:', amountMsats);
-
-    const invoiceResponse = await axios.get(`${callback}?amount=${amountMsats}`, { timeout: 5000 });
-    const invoice = invoiceResponse.data.pr;
-
-    if (!invoice) {
-      throw new Error('No invoice in response');
-    }
-
-    return invoice;
-  } catch (error) {
-    console.error('Error resolving Lightning address:', error.message);
-    throw error;
-  }
-}
-
 async function sendPayment(destination, amount, currency) {
   try {
-    let invoice;
+    const payload = {
+      destination,
+      amount,
+      currency,
+    };
 
-    if (destination.includes('@')) {
-      console.log('Resolving Lightning address:', destination);
-      invoice = await resolveLightningAddress(destination, amount);
-    } else {
-      console.log('Treating destination as invoice:', destination);
-      invoice = destination; // Assume it's already an invoice
-    }
-
-    console.log('Sending payment with invoice:', invoice);
+    console.log('Sending payment with payload:', payload);
 
     const response = await axios.post(
-      `${SPEED_WALLET_API_BASE}/payments`,
-      { payment_request: invoice },
+      `${SPEED_WALLET_API_BASE}/payments/send`,
+      payload,
       {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
           'Content-Type': 'application/json',
           'speed-version': '2022-04-15',
         },
-        timeout: 5000,
+        timeout: 10000, // Increased timeout for payment processing
       }
     );
 
