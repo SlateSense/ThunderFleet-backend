@@ -339,13 +339,58 @@ async function createInvoice(amountSats, customerId, description) {
   }
 }
 
+async function resolveLightningAddress(address, amountSats) {
+  try {
+    const [username, domain] = address.split('@');
+    if (!username || !domain) {
+      throw new Error('Invalid Lightning address');
+    }
+
+    const lnurl = `https://${domain}/.well-known/lnurlp/${username}`;
+    console.log('Fetching LNURL metadata from:', lnurl);
+
+    const metadataResponse = await axios.get(lnurl, { timeout: 5000 });
+    const metadata = metadataResponse.data;
+
+    if (metadata.tag !== 'payRequest') {
+      throw new Error('Invalid LNURL metadata: not a payRequest');
+    }
+
+    const callback = metadata.callback;
+    const amountMsats = amountSats * 1000; // Convert satoshis to millisatoshis
+    console.log('Requesting invoice from:', callback, 'with amount:', amountMsats);
+
+    const invoiceResponse = await axios.get(`${callback}?amount=${amountMsats}`, { timeout: 5000 });
+    const invoice = invoiceResponse.data.pr;
+
+    if (!invoice) {
+      throw new Error('No invoice in response');
+    }
+
+    return invoice;
+  } catch (error) {
+    console.error('Error resolving Lightning address:', error.message);
+    throw error;
+  }
+}
+
 async function sendPayment(destination, amount, currency) {
   try {
-    console.log('Sending payment to:', destination);
-    console.log('Payment details:', { amount, currency });
+    let invoice;
+
+    if (destination.includes('@')) {
+      console.log('Resolving Lightning address:', destination);
+      invoice = await resolveLightningAddress(destination, amount);
+    } else {
+      console.log('Treating destination as invoice:', destination);
+      invoice = destination; // Assume it's already an invoice
+    }
+
+    console.log('Sending payment with invoice:', invoice);
+
     const response = await axios.post(
       `${SPEED_WALLET_API_BASE}/payments`,
-      { destination, amount, currency },
+      { invoice: invoice },
       {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
@@ -355,13 +400,13 @@ async function sendPayment(destination, amount, currency) {
         timeout: 5000,
       }
     );
+
     console.log('Send Payment Response:', JSON.stringify(response.data, null, 2));
     return response.data;
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
-    console.error('Send Payment Error:', errorMessage);
+    console.error('Send Payment Error:', errorMessage, error.response?.status);
     if (error.response) {
-      console.error('Response status:', error.response.status);
       console.error('Response data:', JSON.stringify(error.response.data, null, 2));
     } else {
       console.error('Error details:', error);
