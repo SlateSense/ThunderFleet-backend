@@ -179,18 +179,18 @@ const PAYOUTS = {
   10000: { winner: 17000, platformFee: 3000 },
 };
 
-const BOT_JOIN_DELAYS = [13000, 15000, 17000, 19000, 21000, 23000, 25000]; // 13-25 seconds
+const BOT_JOIN_DELAYS = [13000, 15000, 17000, 19000, 21000, 23000, 25000];
 const BOT_THINKING_TIME = {
-  MIN: 1000, // Reduced from 2000
-  MAX: 3000,  // Reduced from 5000
+  MIN: 1000,
+  MAX: 3000,
 };
 const BOT_BEHAVIOR = {
-  HIT_CHANCE: 0.5,            // 50% chance to hit
+  HIT_CHANCE: 0.5,
   ADJACENT_PATTERNS: {
     ONE_ADJACENT: 0,
-    TWO_ADJACENT: 0.30,       // 30% chance
-    THREE_ADJACENT: 0.20,     // 20% chance
-    INSTANT_SINK: 0.25,        // 25% chance
+    TWO_ADJACENT: 0.30,
+    THREE_ADJACENT: 0.20,
+    INSTANT_SINK: 0.25,
   }
 };
 
@@ -341,7 +341,8 @@ async function createInvoice(amountSats, customerId, description) {
 
 async function sendPayment(destination, amount, currency) {
   try {
-    console.log('Sending payment:', { destination, amount, currency });
+    console.log('Sending payment to:', destination);
+    console.log('Payment details:', { amount, currency });
     const response = await axios.post(
       `${SPEED_WALLET_API_BASE}/payments`,
       { destination, amount, currency },
@@ -354,11 +355,17 @@ async function sendPayment(destination, amount, currency) {
         timeout: 5000,
       }
     );
-    console.log('Send Payment Response:', response.data);
+    console.log('Send Payment Response:', JSON.stringify(response.data, null, 2));
     return response.data;
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
-    console.error('Send Payment Error:', errorMessage, error.response?.status);
+    console.error('Send Payment Error:', errorMessage);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+    } else {
+      console.error('Error details:', error);
+    }
     throw new Error(`Failed to send payment: ${errorMessage}`);
   }
 }
@@ -395,7 +402,7 @@ class SeaBattleGame {
     this.botCheatMode = {};
     this.botSunkShips = {};
     this.humanSunkShips = {};
-    this.placementConfirmed = {}; // Track placement confirmation
+    this.placementConfirmed = {};
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -409,7 +416,7 @@ class SeaBattleGame {
     this.bets[playerId] = false;
     this.payments[playerId] = false;
     this.shipHits[playerId] = 0;
-    this.placementConfirmed[playerId] = false; // Initialize placement confirmation
+    this.placementConfirmed[playerId] = false;
     const seed = playerId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) + Date.now();
     this.randomGenerators[playerId] = mulberry32(seed);
 
@@ -438,7 +445,7 @@ class SeaBattleGame {
       }
       setTimeout(() => {
         this.startPlacing();
-      }, 10000); // Increased from 2000ms to 10000ms for a 10-second delay
+      }, 10000);
     } else {
       this.startMatchmaking();
     }
@@ -475,9 +482,9 @@ class SeaBattleGame {
           }
         }, this.placementTime * 1000);
       } else if (this.players[playerId].isBot) {
-        this.autoPlaceShips(playerId); // Place ships for bot
-        this.players[playerId].ready = false; // Reset ready for bot until human is ready
-        this.placementConfirmed[playerId] = true; // Bot placement is confirmed
+        this.autoPlaceShips(playerId);
+        this.players[playerId].ready = false;
+        this.placementConfirmed[playerId] = true;
       }
     });
     
@@ -550,7 +557,7 @@ class SeaBattleGame {
         ships: placements,
       });
     } else {
-      this.placementConfirmed[playerId] = true; // Confirm bot placement
+      this.placementConfirmed[playerId] = true;
     }
   }
 
@@ -683,7 +690,7 @@ class SeaBattleGame {
     });
     
     player.ready = true;
-    this.placementConfirmed[playerId] = true; // Mark placement as confirmed
+    this.placementConfirmed[playerId] = true;
     
     if (this.placementTimers[playerId]) {
       clearTimeout(this.placementTimers[playerId]);
@@ -752,10 +759,10 @@ class SeaBattleGame {
     const opponent = this.players[opponentId];
 
     const directions = [
-      [-1, 0],  // Up
-      [1, 0],   // Down
-      [0, -1],  // Left
-      [0, 1],    // Right
+      [-1, 0],
+      [1, 0],
+      [0, -1],
+      [0, 1],
     ];
 
     for (const [dr, dc] of directions) {
@@ -1085,11 +1092,9 @@ class SeaBattleGame {
           const botSunk = this.botSunkShips[playerId] || 0;
           const humanSunk = this.humanSunkShips[opponentId] || 0;
 
-          // Always win logic: if bot is behind or endgame, cheat
           if (this.shouldBotCheatToWin(playerId, opponentId) && availableShips.length > 0) {
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
-            // Otherwise, fire randomly
             position = available[Math.floor(seededRandom() * available.length)];
           }
         }
@@ -1225,12 +1230,10 @@ class SeaBattleGame {
   }
 
   shouldBotCheatToWin(playerId, opponentId) {
-    // Bot cheats if human is ahead, or if either player is close to winning
     const botSunk = this.botSunkShips[playerId] || 0;
     const humanSunk = this.humanSunkShips[opponentId] || 0;
     const botHits = this.shipHits[playerId] || 0;
     const humanHits = this.shipHits[opponentId] || 0;
-    // Bot cheats if human is ahead, or if 3 or fewer ship cells remain for either player
     return (
       humanSunk > botSunk ||
       (this.totalShipCells - botHits <= 3) ||
@@ -1293,11 +1296,13 @@ class SeaBattleGame {
       clearInterval(this.matchmakingTimerInterval);
       this.matchmakingTimerInterval = null;
     }
-    Object.keys(this.players).forEach(playerId => {
-      if (!this.players[playerId].isBot) {
-        io.to(playerId).emit('error', { message: 'Game canceled.' });
-      }
-    });
+    if (!this.winner) {
+      Object.keys(this.players).forEach(playerId => {
+        if (!this.players[playerId].isBot) {
+          io.to(playerId).emit('error', { message: 'Game canceled.' });
+        }
+      });
+    }
     delete games[this.id];
     console.log(`Game ${this.id} cleaned up`);
   }
@@ -1376,7 +1381,6 @@ io.on('connection', (socket) => {
         if (Object.keys(game.players).length === 1) {
           const botId = `bot-${Date.now()}`;
           game.addPlayer(botId, 'bot@thunderfleet.com', true);
-          // Do NOT call game.startMatchmaking() here!
         }
       }, botDelay);
 
