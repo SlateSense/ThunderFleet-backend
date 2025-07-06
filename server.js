@@ -37,7 +37,7 @@ console.log('Debug-2025-06-16-2: Trust proxy enabled');
 app.use(cors({
   origin: '*',
   methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"]
+  allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
 }));
 console.log('Debug-2025-06-16-2: CORS middleware applied');
 
@@ -45,7 +45,7 @@ app.use(express.json());
 
 const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100
+  max: 100,
 });
 console.log('Debug-2025-06-16-2: Rate limiter configured');
 
@@ -92,7 +92,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         console.log(`Payment verified for player ${socket.id} via webhook: ${invoiceId}`);
 
         let game = Object.values(games).find(g => 
-          Object.keys(g.players).length === 1 && g.betAmount === players[socket.id].betAmount
+          Object.keys(g.players).length === 1 && g.betAmount === players[socket.id].betAmount,
         );
         
         if (!game) {
@@ -144,9 +144,9 @@ console.log('Debug-2025-06-16-2: HTTP server created');
 const io = socketio(server, {
   cors: {
     origin: '*',
-    methods: ["GET", "POST"]
+    methods: ["GET", "POST"],
   },
-  transports: ['websocket', 'polling']
+  transports: ['websocket', 'polling'],
 });
 console.log('Debug-2025-06-16-2: Socket.IO initialized');
 
@@ -176,13 +176,13 @@ const PAYOUTS = {
   500: { winner: 800, platformFee: 200 },
   1000: { winner: 1700, platformFee: 300 },
   5000: { winner: 8000, platformFee: 2000 },
-  10000: { winner: 17000, platformFee: 3000 }
+  10000: { winner: 17000, platformFee: 3000 },
 };
 
 const BOT_JOIN_DELAYS = [13000, 15000, 17000, 19000, 21000, 23000, 25000]; // 13-25 seconds
 const BOT_THINKING_TIME = {
   MIN: 1000, // Reduced from 2000
-  MAX: 3000  // Reduced from 5000
+  MAX: 3000,  // Reduced from 5000
 };
 const BOT_BEHAVIOR = {
   HIT_CHANCE: 0.5,            // 50% chance to hit
@@ -190,7 +190,7 @@ const BOT_BEHAVIOR = {
     ONE_ADJACENT: 0,
     TWO_ADJACENT: 0.30,       // 30% chance
     THREE_ADJACENT: 0.20,     // 20% chance
-    INSTANT_SINK: 0.25        // 25% chance
+    INSTANT_SINK: 0.25,        // 25% chance
   }
 };
 
@@ -203,7 +203,7 @@ const SHIP_CONFIG = [
   { name: 'Battleship', size: 4 },
   { name: 'Submarine', size: 3 },
   { name: 'Destroyer', size: 3 },
-  { name: 'Patrol Boat', size: 2 }
+  { name: 'Patrol Boat', size: 2 },
 ];
 
 const games = {};
@@ -255,16 +255,16 @@ async function createInvoice(amountSats, customerId, description) {
             type: 'custom_line_item',
             quantity: 1,
             name: description,
-            unit_amount: amountSats
+            unit_amount: amountSats,
           }
-        ]
+        ],
       },
       {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        timeout: 10000
+        timeout: 10000,
       }
     );
     const invoiceId = createResponse.data.id;
@@ -276,9 +276,9 @@ async function createInvoice(amountSats, customerId, description) {
       {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
-          'speed-version': '2022-04-15'
+          'speed-version': '2022-04-15',
         },
-        timeout: 5000
+        timeout: 5000,
       }
     );
     console.log('Finalized invoice:', invoiceId);
@@ -288,9 +288,9 @@ async function createInvoice(amountSats, customerId, description) {
       {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
-          'speed-version': '2022-04-15'
+          'speed-version': '2022-04-15',
         },
-        timeout: 5000
+        timeout: 5000,
       }
     );
     console.log('Retrieved invoice:', retrieveResponse.data.id);
@@ -324,7 +324,7 @@ async function createInvoice(amountSats, customerId, description) {
     return {
       hostedInvoiceUrl: invoiceData.hosted_invoice_url,
       lightningInvoice: lightningInvoice,
-      invoiceId: invoiceData.id
+      invoiceId: invoiceData.id,
     };
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
@@ -333,7 +333,7 @@ async function createInvoice(amountSats, customerId, description) {
     console.error('Create Invoice Error:', {
       message: errorMessage,
       status: errorStatus,
-      details: errorDetails
+      details: errorDetails,
     });
     throw new Error(`Failed to create invoice: ${errorMessage} (Status: ${errorStatus})`);
   }
@@ -349,9 +349,9 @@ async function sendPayment(destination, amount, currency) {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
           'Content-Type': 'application/json',
-          'speed-version': '2022-04-15'
+          'speed-version': '2022-04-15',
         },
-        timeout: 5000
+        timeout: 5000,
       }
     );
     console.log('Send Payment Response:', response.data);
@@ -404,7 +404,7 @@ class SeaBattleGame {
       board: Array(GRID_SIZE).fill('water'),
       ships: [],
       ready: false,
-      isBot
+      isBot,
     };
     this.bets[playerId] = false;
     this.payments[playerId] = false;
@@ -419,7 +419,7 @@ class SeaBattleGame {
         adjacentQueue: [],
         triedPositions: new Set(),
         hitMode: false,
-        targets: []
+        targets: [],
       };
       this.botShots[playerId] = new Set();
       this.botTargetedShip[playerId] = null;
@@ -427,7 +427,7 @@ class SeaBattleGame {
     } else {
       io.to(playerId).emit('joined', { 
         gameId: this.id, 
-        playerId: playerId 
+        playerId: playerId, 
       });
     }
 
@@ -527,7 +527,7 @@ class SeaBattleGame {
             positions,
             horizontal,
             sunk: false,
-            hits: 0
+            hits: 0,
           });
           placed = true;
         }
@@ -547,7 +547,7 @@ class SeaBattleGame {
       io.to(playerId).emit('games', { 
         count: Object.values(this.players).filter(p => p.ready).length,
         grid: player.board,
-        ships: placements
+        ships: placements,
       });
     } else {
       this.placementConfirmed[playerId] = true; // Confirm bot placement
@@ -608,7 +608,7 @@ class SeaBattleGame {
           positions: ship.positions,
           horizontal: ship.horizontal,
           sunk: false,
-          hits: 0
+          hits: 0,
         });
       }
     });
@@ -616,13 +616,13 @@ class SeaBattleGame {
     io.to(playerId).emit('games', { 
       count: Object.values(this.players).filter(p => p.ready).length,
       grid: player.board,
-      ships: player.ships
+      ships: player.ships,
     });
 
     const otherPlayers = Object.keys(this.players).filter(id => id !== playerId);
     otherPlayers.forEach(id => {
       io.to(id).emit('games', { 
-        count: Object.values(this.players).filter(p => p.ready).length
+        count: Object.values(this.players).filter(p => p.ready).length,
       });
     });
   }
@@ -678,7 +678,7 @@ class SeaBattleGame {
         positions: ship.positions,
         horizontal: ship.horizontal,
         sunk: false,
-        hits: 0
+        hits: 0,
       });
     });
     
@@ -694,13 +694,13 @@ class SeaBattleGame {
     io.to(playerId).emit('games', { 
       count: Object.values(this.players).filter(p => p.ready).length,
       grid: player.board,
-      ships: player.ships
+      ships: player.ships,
     });
 
     const otherPlayers = Object.keys(this.players).filter(id => id !== playerId);
     otherPlayers.forEach(id => {
       io.to(id).emit('games', { 
-        count: Object.values(this.players).filter(p => p.ready).length
+        count: Object.values(this.players).filter(p => p.ready).length,
       });
     });
 
@@ -709,7 +709,7 @@ class SeaBattleGame {
 
   checkStartGame() {
     const allConfirmed = Object.keys(this.players).every(playerId => 
-      this.placementConfirmed[playerId]
+      this.placementConfirmed[playerId],
     );
     if (allConfirmed) {
       this.startGame();
@@ -726,7 +726,7 @@ class SeaBattleGame {
       if (!this.players[id].isBot) {
         io.to(id).emit('startGame', { 
           turn: this.turn,
-          message: id === this.turn ? 'Your turn!' : 'Opponent\'s turn'
+          message: id === this.turn ? 'Your turn!' : 'Opponent\'s turn',
         });
       }
     });
@@ -755,7 +755,7 @@ class SeaBattleGame {
       [-1, 0],  // Up
       [1, 0],   // Down
       [0, -1],  // Left
-      [0, 1]    // Right
+      [0, 1],    // Right
     ];
 
     for (const [dr, dc] of directions) {
@@ -823,7 +823,7 @@ class SeaBattleGame {
     
     const uniqueAdjacents = [...new Set(adjacents)].filter(
       pos => !botState.triedPositions.has(pos) && 
-             (opponent.board[pos] === 'ship' || opponent.board[pos] === 'water')
+             (opponent.board[pos] === 'ship' || opponent.board[pos] === 'water'),
     );
     
     if (uniqueAdjacents.length > 0) {
@@ -902,7 +902,7 @@ class SeaBattleGame {
             queue: [],
             sunk: false,
             lastHit: position,
-            initialHit: position
+            initialHit: position,
           };
           botState.targets.push(thisTarget);
           botState.currentTarget = thisTarget;
@@ -962,13 +962,13 @@ class SeaBattleGame {
     io.to(opponentId).emit('fireResult', {
       player: playerId,
       position,
-      hit: isHit
+      hit: isHit,
     });
     
     io.to(this.id).emit('fireResult', {
       player: playerId,
       position,
-      hit: isHit
+      hit: isHit,
     });
 
     if (isHit) {
@@ -1017,7 +1017,7 @@ class SeaBattleGame {
           }
         } else {
           const unfinishedTargets = botState.targets.filter(
-            t => !t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0))
+            t => !t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0)),
           );
         
           if (unfinishedTargets.length > 0) {
@@ -1068,7 +1068,7 @@ class SeaBattleGame {
               const unhit = ship.positions.find(pos =>
                 !botState.triedPositions.has(pos) &&
                 opponent.board[pos] !== 'hit' &&
-                opponent.board[pos] !== 'miss'
+                opponent.board[pos] !== 'miss',
               );
               if (unhit !== undefined) {
                 position = unhit;
@@ -1117,7 +1117,7 @@ class SeaBattleGame {
     io.to(opponentId).emit('fireResult', {
       player: playerId,
       position,
-      hit: true
+      hit: true,
     });
 
     if (this.shipHits[playerId] >= this.totalShipCells) {
@@ -1134,7 +1134,7 @@ class SeaBattleGame {
       triedPositions: new Set(),
       lastHitShip: null,
       lastHitPosition: null,
-      targets: []
+      targets: [],
     };
     return this.botState[playerId];
   }
@@ -1178,7 +1178,7 @@ class SeaBattleGame {
       position,
       hit: isHit,
       sunk: !!sunkShip,
-      shipName: sunkShip?.name
+      shipName: sunkShip?.name,
     };
     
     io.to(opponentId).emit('fireResult', fireResult);
@@ -1200,7 +1200,7 @@ class SeaBattleGame {
             position: pos,
             hit: true,
             sunk: true,
-            shipName: sunkShip.name
+            shipName: sunkShip.name,
           };
           
           io.to(opponentId).emit('fireResult', sinkUpdate);
@@ -1252,7 +1252,7 @@ class SeaBattleGame {
       if (this.players[playerId].isBot) {
         humanPlayers.forEach(id => {
           io.to(id).emit('gameEnd', { 
-            message: 'You lost! Better luck next time!'
+            message: 'You lost! Better luck next time!',
           });
         });
         console.log(`Bot ${playerId} won the game. Bet amount ${this.betAmount} SATS retained by the house.`);
@@ -1265,12 +1265,12 @@ class SeaBattleGame {
         console.log('Platform fee (including winner fee) sent:', platformFee);
         humanPlayers.forEach(id => {
           io.to(id).emit('gameEnd', { 
-            message: id === playerId ? `You won! ${payout.winner} sats awarded!` : 'You lost! Better luck next time!'
+            message: id === playerId ? `You won! ${payout.winner} sats awarded!` : 'You lost! Better luck next time!',
           });
         });
         
         io.to(this.id).emit('transaction', { 
-          message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee + winnerFee} sats total platform fee.`
+          message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee + winnerFee} sats total platform fee.`,
         });
         console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
         console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
@@ -1326,7 +1326,7 @@ io.on('connection', (socket) => {
       const invoiceData = await createInvoice(
         betAmount,
         customerId,
-        `Entry fee for Lightning Sea Battle - Player ${socket.id}`
+        `Entry fee for Lightning Sea Battle - Player ${socket.id}`,
       );
 
       const lightningInvoice = invoiceData.lightningInvoice;
@@ -1336,7 +1336,7 @@ io.on('connection', (socket) => {
       socket.emit('paymentRequest', {
         lightningInvoice: lightningInvoice,
         hostedInvoiceUrl: hostedInvoiceUrl,
-        invoiceId: invoiceData.invoiceId
+        invoiceId: invoiceData.invoiceId,
       });
 
       invoiceToSocket[invoiceData.invoiceId] = socket;
@@ -1361,7 +1361,7 @@ io.on('connection', (socket) => {
       });
 
       const game = Object.values(games).find(g => 
-        g.betAmount === betAmount && Object.keys(g.players).length < 2
+        g.betAmount === betAmount && Object.keys(g.players).length < 2,
       ) || new SeaBattleGame(crypto.randomBytes(16).toString('hex'), betAmount);
 
       if (!games[game.id]) {
@@ -1448,7 +1448,7 @@ io.on('connection', (socket) => {
         const opponentId = Object.keys(game.players).find(id => id !== socket.id);
         if (opponentId && !game.winner) {
           io.to(opponentId).emit('gameEnd', { 
-            message: 'Player disconnected'
+            message: 'Player disconnected',
           });
         }
         delete game.players[socket.id];
@@ -1481,7 +1481,7 @@ io.on('connection', (socket) => {
       io.to(socket.id).emit('games', {
         count: Object.values(game.players).filter(p => p.ready).length,
         grid: game.players[socket.id].board,
-        ships: game.players[socket.id].ships
+        ships: game.players[socket.id].ships,
       });
     }
   });
