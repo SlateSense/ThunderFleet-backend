@@ -302,9 +302,10 @@ async function createInvoice(amountSats, customerId, description) {
 async function sendPayment(destination, amount, currency) {
   try {
     const payload = {
-      destination,
+      withdraw_request: destination,
       amount,
       currency,
+      withdraw_method: 'lightning',
     };
 
     console.log('Sending payment with payload:', payload);
@@ -1211,7 +1212,11 @@ class SeaBattleGame {
     this.winner = playerId;
     
     try {
-      const winnerAddress = this.players[playerId].lightningAddress;
+      let winnerAddress = this.players[playerId].lightningAddress;
+      if (winnerAddress && !winnerAddress.includes('@')) {
+        winnerAddress = `${winnerAddress}@speed.app`;
+      }
+
       const payout = PAYOUTS[this.betAmount];
       if (!payout) {
         throw new Error('Invalid bet amount for payout');
