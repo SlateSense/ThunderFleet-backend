@@ -16,6 +16,9 @@ console.log('Debug-2025-06-16-2: cors loaded');
 const axios = require('axios');
 console.log('Debug-2025-06-16-2: axios loaded');
 
+const { Speed } = require('@speeddev/speed-js');
+console.log('Debug-2025-06-16-2: speed-js loaded');
+
 const { bech32 } = require('bech32');
 console.log('Debug-2025-06-16-2: bech32 loaded');
 
@@ -154,6 +157,13 @@ const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
+
+// Initialize Speed SDK
+let speedClient;
+if (SPEED_WALLET_SECRET_KEY) {
+  speedClient = new Speed(SPEED_WALLET_SECRET_KEY);
+  console.log('Speed SDK initialized');
+}
 
 console.log('Starting server... Debug-2025-06-16-2');
 
@@ -301,17 +311,55 @@ async function createInvoice(amountSats, customerId, description) {
 
 async function sendPayment(destination, amount, currency) {
   try {
+    // Ensure the destination has @speed.app suffix if it doesn't contain @
+    let formattedDestination = destination;
+    if (!formattedDestination.includes('@')) {
+      formattedDestination = `${formattedDestination}@speed.app`;
+    }
+
+    console.log('Attempting to send payment to:', formattedDestination);
+    
+    // Validate inputs
+    if (!formattedDestination || formattedDestination.trim() === '') {
+      throw new Error('Invalid destination address');
+    }
+    if (!amount || amount <= 0) {
+      throw new Error('Invalid payment amount');
+    }
+    if (!currency || currency.trim() === '') {
+      throw new Error('Invalid currency');
+    }
+
+    // Try using Speed SDK first
+    if (speedClient) {
+      console.log('Using Speed SDK to send payment');
+      try {
+        const payment = await speedClient.payments.create({
+          lightning_address: formattedDestination,
+          amount: amount,
+          currency: currency,
+        });
+        console.log('Speed SDK Payment Response:', JSON.stringify(payment, null, 2));
+        return payment;
+      } catch (sdkError) {
+        console.error('Speed SDK Error:', sdkError.message);
+        // Fall back to direct API call
+      }
+    }
+
+    // Fallback to direct API call
+    console.log('Falling back to direct API call');
     const payload = {
-      withdraw_request: destination,
-      amount,
-      currency,
-      withdraw_method: 'lightning',
+      currency: currency,
+      amount: amount,
+      lightning_address: formattedDestination,
+      method: 'lightning',
     };
 
     console.log('Sending payment with payload:', payload);
 
     const response = await axios.post(
-      `${SPEED_WALLET_API_BASE}/payments/send`,
+      `${SPEED_WALLET_API_BASE}/payments`,
       payload,
       {
         headers: {
@@ -319,7 +367,7 @@ async function sendPayment(destination, amount, currency) {
           'Content-Type': 'application/json',
           'speed-version': '2022-04-15',
         },
-        timeout: 10000, // Increased timeout for payment processing
+        timeout: 15000,
       }
     );
 
@@ -1212,9 +1260,11 @@ class SeaBattleGame {
     this.winner = playerId;
     
     try {
-      let winnerAddress = this.players[playerId].lightningAddress;
-      if (winnerAddress && !winnerAddress.includes('@')) {
-        winnerAddress = `${winnerAddress}@speed.app`;
+      const winnerAddress = this.players[playerId].lightningAddress;
+      
+      // Validate that winnerAddress exists and is not a bot address
+      if (!winnerAddress || winnerAddress.includes('bot@')) {
+        throw new Error('Invalid or missing Lightning address for winner');
       }
 
       const payout = PAYOUTS[this.betAmount];
@@ -1289,14 +1339,24 @@ io.on('connection', (socket) => {
   socket.on('joinGame', async ({ lightningAddress, betAmount }) => {
     try {
       console.log('Join game request:', { lightningAddress, betAmount });
+      
+      // Validate and format Lightning address
+      let formattedLightningAddress = lightningAddress;
+      if (formattedLightningAddress && !formattedLightningAddress.includes('@')) {
+        formattedLightningAddress = `${formattedLightningAddress}@speed.app`;
+      }
+      
+      console.log('Original address:', lightningAddress);
+      console.log('Formatted address:', formattedLightningAddress);
+      
       const validBetAmounts = [300, 500, 1000, 5000, 10000];
       if (!validBetAmounts.includes(betAmount)) {
         throw new Error('Invalid bet amount');
       }
 
-      console.log(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${lightningAddress}`);
+      console.log(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${formattedLightningAddress}`);
 
-      players[socket.id] = { lightningAddress, paid: false, betAmount };
+      players[socket.id] = { lightningAddress: formattedLightningAddress, paid: false, betAmount };
 
       const customerId = 'cus_mbgcu49gfgNyffw9';
       const invoiceData = await createInvoice(
