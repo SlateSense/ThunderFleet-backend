@@ -1211,7 +1211,9 @@ class SeaBattleGame {
     this.winner = playerId;
     
     try {
-      const winnerAddress = this.players[playerId].lightningAddress;
+      const winnerAddressUsername = this.players[playerId].lightningAddress;
+      // Append @speed.app to the username to form the complete Lightning address
+      const winnerAddress = winnerAddressUsername.includes('@') ? winnerAddressUsername : `${winnerAddressUsername}@speed.app`;
       const payout = PAYOUTS[this.betAmount];
       if (!payout) {
         throw new Error('Invalid bet amount for payout');
