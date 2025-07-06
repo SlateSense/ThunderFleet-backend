@@ -151,8 +151,8 @@ const io = socketio(server, {
 console.log('Debug-2025-06-16-2: Socket.IO initialized');
 
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
-const {SPEED_WALLET_SECRET_KEY} = process.env;
-const {SPEED_WALLET_WEBHOOK_SECRET} = process.env;
+const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
+const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
 
 console.log('Starting server... Debug-2025-06-16-2');
@@ -1329,8 +1329,8 @@ io.on('connection', (socket) => {
         `Entry fee for Lightning Sea Battle - Player ${socket.id}`,
       );
 
-      const {lightningInvoice} = invoiceData;
-      const {hostedInvoiceUrl} = invoiceData;
+      const lightningInvoice = invoiceData.lightningInvoice;
+      const hostedInvoiceUrl = invoiceData.hostedInvoiceUrl;
 
       console.log('Payment Request:', { lightningInvoice, hostedInvoiceUrl });
       socket.emit('paymentRequest', {
