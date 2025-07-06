@@ -311,18 +311,33 @@ async function createInvoice(amountSats, customerId, description) {
 
 async function sendPayment(destination, amount, currency) {
   try {
-    // Ensure the destination has @speed.app suffix if it doesn't contain @
+    // Clean and validate the destination address
     let formattedDestination = destination;
-    if (!formattedDestination.includes('@')) {
+    if (!formattedDestination || formattedDestination.trim() === '') {
+      throw new Error('Empty destination address');
+    }
+    
+    // Remove any existing @speed.app and add it properly
+    formattedDestination = formattedDestination.trim().toLowerCase();
+    if (formattedDestination.includes('@')) {
+      // If it already contains @, validate it's a speed.app address
+      if (!formattedDestination.endsWith('@speed.app')) {
+        throw new Error('Only @speed.app Lightning addresses are supported');
+      }
+    } else {
+      // Add @speed.app suffix
       formattedDestination = `${formattedDestination}@speed.app`;
+    }
+    
+    // Validate the username part (before @)
+    const username = formattedDestination.split('@')[0];
+    if (!/^[a-z0-9._-]+$/.test(username)) {
+      throw new Error('Invalid Lightning address format. Username can only contain letters, numbers, dots, hyphens, and underscores.');
     }
 
     console.log('Attempting to send payment to:', formattedDestination);
     
     // Validate inputs
-    if (!formattedDestination || formattedDestination.trim() === '') {
-      throw new Error('Invalid destination address');
-    }
     if (!amount || amount <= 0) {
       throw new Error('Invalid payment amount');
     }
@@ -343,7 +358,11 @@ async function sendPayment(destination, amount, currency) {
         return payment;
       } catch (sdkError) {
         console.error('Speed SDK Error:', sdkError.message);
-        // Fall back to direct API call
+        // Check if this is a critical error or if we should fall back
+        if (sdkError.message && sdkError.message.includes('Invalid payment id')) {
+          throw new Error(`Payment failed: Invalid Lightning address '${formattedDestination}'. Please verify the address is correct.`);
+        }
+        // Fall back to direct API call for other errors
       }
     }
 
@@ -375,13 +394,29 @@ async function sendPayment(destination, amount, currency) {
     return response.data;
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
-    console.error('Send Payment Error:', errorMessage, error.response?.status);
+    const errorStatus = error.response?.status;
+    console.error('Send Payment Error:', errorMessage, errorStatus);
+    
     if (error.response) {
       console.error('Response data:', JSON.stringify(error.response.data, null, 2));
     } else {
       console.error('Error details:', error);
     }
-    throw new Error(`Failed to send payment: ${errorMessage}`);
+    
+    // Provide more specific error messages based on error type
+    if (errorMessage && errorMessage.includes('Invalid payment id')) {
+      throw new Error(`Payment failed: The Lightning address '${destination}' is invalid or does not exist. Please check the username and try again.`);
+    } else if (errorStatus === 404) {
+      throw new Error(`Payment failed: Lightning address '${destination}' not found. Please verify the username is correct.`);
+    } else if (errorStatus === 400) {
+      throw new Error(`Payment failed: Invalid request. Please check the Lightning address format.`);
+    } else if (errorStatus === 429) {
+      throw new Error(`Payment failed: Too many requests. Please wait a moment and try again.`);
+    } else if (errorStatus >= 500) {
+      throw new Error(`Payment failed: Server error. Please try again later.`);
+    } else {
+      throw new Error(`Failed to send payment: ${errorMessage}`);
+    }
   }
 }
 
