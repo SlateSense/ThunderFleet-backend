@@ -346,7 +346,7 @@ async function resolveLightningAddress(address, amountSats) {
       throw new Error('Invalid Lightning address');
     }
 
-    const lnurl = `[invalid url, do not cite]`;
+    const lnurl = `https://${domain}/.well-known/lnurlp/${username}`;
     console.log('Fetching LNURL metadata from:', lnurl);
 
     const metadataResponse = await axios.get(lnurl, { timeout: 5000 });
