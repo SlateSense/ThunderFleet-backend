@@ -393,11 +393,11 @@ async function sendPayment(destination, amount, currency) {
       }
     }
 
-    console.log('Sending payment with invoice:', invoice);
+    console.log('Sending payment with payment_request:', invoice);
 
     const response = await axios.post(
       `${SPEED_WALLET_API_BASE}/payments`,
-      { invoice: invoice },
+      { payment_request: invoice, currency: 'SATS' },
       {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
