@@ -1296,10 +1296,17 @@ class SeaBattleGame {
   }
 
   async endGame(playerId) {
+    if (this.winner) return; // Prevent endGame from running multiple times
     this.winner = playerId;
-    
+
     try {
-      let winnerAddress = this.players[playerId].lightningAddress;
+      const winnerPlayer = this.players[playerId];
+      if (!winnerPlayer) {
+        console.error(`Winner player with ID ${playerId} not found in game ${this.id}`);
+        return;
+      }
+
+      let winnerAddress = winnerPlayer.lightningAddress;
       if (winnerAddress && !winnerAddress.includes('@')) {
         winnerAddress = `${winnerAddress}@speed.app`;
       }
@@ -1310,29 +1317,35 @@ class SeaBattleGame {
       }
 
       const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
-      if (this.players[playerId].isBot) {
+
+      if (winnerPlayer.isBot) {
         humanPlayers.forEach(id => {
-          io.to(id).emit('gameEnd', { 
+          io.to(id).emit('gameEnd', {
             message: 'You lost! Better luck next time!',
           });
         });
         console.log(`Bot ${playerId} won the game. Bet amount ${this.betAmount} SATS retained by the house.`);
       } else {
+        // Announce winner first
+        humanPlayers.forEach(id => {
+          io.to(id).emit('gameEnd', {
+            message: id === playerId ? `You won! ${payout.winner} sats are being sent!` : 'You lost! Better luck next time!',
+          });
+        });
+
+        // Process payments
         const winnerPayment = await sendPayment(winnerAddress, payout.winner, 'SATS');
         console.log('Winner payment sent:', winnerPayment);
 
         const winnerFee = payout.winner * 0.01;
         const platformFee = await sendPayment('slatesense@tryspeed.com', payout.platformFee + winnerFee, 'SATS');
         console.log('Platform fee (including winner fee) sent:', platformFee);
-        humanPlayers.forEach(id => {
-          io.to(id).emit('gameEnd', { 
-            message: id === playerId ? `You won! ${payout.winner} sats awarded!` : 'You lost! Better luck next time!',
-          });
-        });
-        
-        io.to(this.id).emit('transaction', { 
+
+        // Confirm payment transaction to the client
+        io.to(this.id).emit('transaction', {
           message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee + winnerFee} sats total platform fee.`,
         });
+
         console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
         console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
         console.log(`Platform fee processed: ${payout.platformFee + winnerFee} SATS to slatesense@tryspeed.com`);
@@ -1342,6 +1355,7 @@ class SeaBattleGame {
       console.log(`Failed to process payment in game ${this.id} for player ${playerId}: ${error.message}`);
       io.to(this.id).emit('error', { message: `Payment processing failed: ${error.message}` });
     } finally {
+      // Cleanup is now safe to call
       this.cleanup();
     }
   }
