@@ -150,7 +150,7 @@ const io = socketio(server, {
 });
 console.log('Debug-2025-06-16-2: Socket.IO initialized');
 
-const SPEED_WALLET_API_BASE = '[invalid url, do not cite]';
+const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com'; // Replace with actual API base URL
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
@@ -792,7 +792,9 @@ class SeaBattleGame {
 
     if (this.players[this.turn].isBot) {
       const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
-      setTimeout(() => this.botFireShot(this.turn), thinkingTime);
+      setTimeout(() => {
+        this.botFireShot(this.turn);
+      }, thinkingTime);
     }
   }
 
