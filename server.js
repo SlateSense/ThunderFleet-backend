@@ -339,7 +339,7 @@ async function createInvoice(amountSats, customerId, description) {
   }
 }
 
-async function resolveLightningAddress(address, amountSats) {
+async function resolveLightningAddress(address, amountSats, currency = 'SATS') {
   try {
     const [username, domain] = address.split('@');
     if (!username || !domain) {
@@ -351,18 +351,20 @@ async function resolveLightningAddress(address, amountSats) {
 
     const metadataResponse = await axios.get(lnurl, { timeout: 5000 });
     const metadata = metadataResponse.data;
+    console.log('Received LNURL metadata:', metadata);
 
     if (metadata.tag !== 'payRequest') {
       throw new Error('Invalid LNURL metadata: not a payRequest');
     }
 
-    const callback = metadata.callback;
-    const amountMsats = amountSats * 1000; // Convert satoshis to millisatoshis
+    const amountMsats = amountSats * 1000;
+    console.log(`Attempting to send ${amountSats} SATS (${amountMsats} msats). Min sendable: ${metadata.minSendable}, Max sendable: ${metadata.maxSendable}`);
 
     if (amountMsats < metadata.minSendable || amountMsats > metadata.maxSendable) {
       throw new Error(`Invalid amount: ${amountSats} SATS is not within the sendable range of ${metadata.minSendable / 1000} to ${metadata.maxSendable / 1000} SATS`);
     }
 
+    const callback = metadata.callback;
     console.log('Requesting invoice from:', callback, 'with amount:', amountMsats);
 
     const invoiceResponse = await axios.get(`${callback}?amount=${amountMsats}`, { timeout: 5000 });
@@ -385,7 +387,7 @@ async function sendPayment(destination, amount, currency) {
 
     if (destination.includes('@')) {
       console.log('Resolving Lightning address:', destination);
-      invoice = await resolveLightningAddress(destination, Number(amount));
+      invoice = await resolveLightningAddress(destination, Number(amount), currency);
       console.log('Resolved invoice:', invoice);
       if (!invoice || !invoice.startsWith('ln')) {
         throw new Error('Invalid or malformed invoice retrieved');
