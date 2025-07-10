@@ -358,6 +358,11 @@ async function resolveLightningAddress(address, amountSats) {
 
     const callback = metadata.callback;
     const amountMsats = amountSats * 1000; // Convert satoshis to millisatoshis
+
+    if (amountMsats < metadata.minSendable || amountMsats > metadata.maxSendable) {
+      throw new Error(`Invalid amount: ${amountSats} SATS is not within the sendable range of ${metadata.minSendable / 1000} to ${metadata.maxSendable / 1000} SATS`);
+    }
+
     console.log('Requesting invoice from:', callback, 'with amount:', amountMsats);
 
     const invoiceResponse = await axios.get(`${callback}?amount=${amountMsats}`, { timeout: 5000 });
