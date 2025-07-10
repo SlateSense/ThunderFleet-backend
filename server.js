@@ -385,7 +385,7 @@ async function sendPayment(destination, amount, currency) {
 
     if (destination.includes('@')) {
       console.log('Resolving Lightning address:', destination);
-      invoice = await resolveLightningAddress(destination, amount);
+      invoice = await resolveLightningAddress(destination, Number(amount));
       console.log('Resolved invoice:', invoice);
       if (!invoice || !invoice.startsWith('ln')) {
         throw new Error('Invalid or malformed invoice retrieved');
@@ -402,7 +402,7 @@ async function sendPayment(destination, amount, currency) {
 
     const response = await axios.post(
       `${SPEED_WALLET_API_BASE}/payments`,
-      { payment_request: invoice, currency: 'SATS' },
+      { payment_request: invoice },
       {
         headers: {
           Authorization: `Basic ${AUTH_HEADER}`,
