@@ -341,6 +341,7 @@ async function createInvoice(amountSats, customerId, description) {
 
 async function resolveLightningAddress(address, amountSats, currency = 'SATS') {
   try {
+    console.log('Resolving Lightning address:', address, 'with amount:', amountSats, 'SATS');
     const [username, domain] = address.split('@');
     if (!username || !domain) {
       throw new Error('Invalid Lightning address');
@@ -393,15 +394,13 @@ async function sendPayment(destination, amount, currency) {
         throw new Error('Invalid or malformed invoice retrieved');
       }
     } else {
-      console.log('Treating destination as invoice:', destination);
       invoice = destination;
       if (!invoice.startsWith('ln')) {
         throw new Error('Invalid invoice format: must start with "ln"');
       }
     }
 
-    console.log('Sending payment with payment_request:', invoice);
-
+    // Send the payment using the Speed API
     const response = await axios.post(
       `${SPEED_WALLET_API_BASE}/payments`,
       { payment_request: invoice },
@@ -415,16 +414,11 @@ async function sendPayment(destination, amount, currency) {
       }
     );
 
-    console.log('Send Payment Response:', JSON.stringify(response.data, null, 2));
+    console.log('Payment response:', response.data);
     return response.data;
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
-    console.error('Send Payment Error:', errorMessage, error.response?.status);
-    if (error.response) {
-      console.error('Response data:', JSON.stringify(error.response.data, null, 2));
-    } else {
-      console.error('Error details:', error);
-    }
+    console.error('Send Payment Error:', errorMessage);
     throw new Error(`Failed to send payment: ${errorMessage}`);
   }
 }
