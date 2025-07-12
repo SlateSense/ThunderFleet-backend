@@ -602,10 +602,21 @@ class SeaBattleGame {
       if (!this.players[playerId].isBot && !this.players[playerId].ready) {
         this.placementTimers[playerId] = setTimeout(() => {
           if (!this.players[playerId].ready) {
+            console.log(`Auto-placing ships for player ${playerId} - time expired`);
             this.autoPlaceShips(playerId);
             this.players[playerId].ready = true;
             this.placementConfirmed[playerId] = true;
+            
+            // Send updated board and ships to player
+            const player = this.players[playerId];
             io.to(playerId).emit('placementAutoSaved');
+            io.to(playerId).emit('games', { 
+              count: Object.values(this.players).filter(p => p.ready).length,
+              grid: player.board,
+              ships: player.ships,
+            });
+            
+            console.log(`Auto-placement complete for ${playerId}. Ships placed:`, player.ships.map(s => s.name));
             this.checkStartGame();
           }
         }, this.placementTime * 1000);
@@ -696,14 +707,33 @@ class SeaBattleGame {
     
     player.ships = placements;
     
+    // Always send updated data to human players
     if (!player.isBot) {
+      console.log(`Sending updated ship placement to player ${playerId}:`, {
+        totalShips: placements.length,
+        shipNames: placements.map(s => s.name),
+        boardCellsWithShips: player.board.filter(cell => cell === 'ship').length
+      });
+      
       io.to(playerId).emit('games', { 
         count: Object.values(this.players).filter(p => p.ready).length,
         grid: player.board,
         ships: placements,
       });
-    } else {
-      this.placementConfirmed[playerId] = true;
+      
+      // Also emit a specific event for auto-placed ships
+      const newlyPlacedShips = placements.filter(ship => 
+        !this.partialPlacements[playerId]?.some(partial => partial.name === ship.name)
+      );
+      
+      if (newlyPlacedShips.length > 0) {
+        console.log(`Auto-placed ${newlyPlacedShips.length} new ships for ${playerId}:`, newlyPlacedShips.map(s => s.name));
+        io.to(playerId).emit('shipsAutoPlaced', {
+          newShips: newlyPlacedShips,
+          allShips: placements,
+          grid: player.board
+        });
+      }
     }
   }
 
