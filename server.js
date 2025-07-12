@@ -198,6 +198,9 @@ const GRID_COLS = 9;
 const GRID_ROWS = 7;
 const GRID_SIZE = GRID_COLS * GRID_ROWS;
 const PLACEMENT_TIME = 45;
+const FIRE_TIME_LIMIT = 15; // 15 seconds to fire
+const DISCONNECT_TIMEOUT = 10; // 10 seconds to reconnect
+const BOT_PLACEMENT_DELAY = 3; // 3 seconds for bot to "think" about placement
 const SHIP_CONFIG = [
   { name: 'Aircraft Carrier', size: 5 },
   { name: 'Battleship', size: 4 },
@@ -522,6 +525,10 @@ class SeaBattleGame {
     this.botSunkShips = {};
     this.humanSunkShips = {};
     this.placementConfirmed = {};
+    this.fireTimers = {};
+    this.disconnectTimers = {};
+    this.playerConnected = {};
+    this.partialPlacements = {}; // Store partial ship placements
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -536,6 +543,8 @@ class SeaBattleGame {
     this.payments[playerId] = false;
     this.shipHits[playerId] = 0;
     this.placementConfirmed[playerId] = false;
+    this.playerConnected[playerId] = true;
+    this.partialPlacements[playerId] = [];
     const seed = playerId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) + Date.now();
     this.randomGenerators[playerId] = mulberry32(seed);
 
@@ -601,9 +610,14 @@ class SeaBattleGame {
           }
         }, this.placementTime * 1000);
       } else if (this.players[playerId].isBot) {
-        this.autoPlaceShips(playerId);
-        this.players[playerId].ready = false;
-        this.placementConfirmed[playerId] = true;
+        // Bot takes time to "think" about placement
+        setTimeout(() => {
+          this.autoPlaceShips(playerId);
+          this.players[playerId].ready = true;
+          this.placementConfirmed[playerId] = true;
+          console.log(`Bot ${playerId} finished placing ships`);
+          this.checkStartGame();
+        }, BOT_PLACEMENT_DELAY * 1000);
       }
     });
     
@@ -616,12 +630,25 @@ class SeaBattleGame {
     const cols = GRID_COLS;
     const rows = GRID_ROWS;
     
-    const placements = [];
+    // Start with existing partial placements
+    const placements = [...(this.partialPlacements[playerId] || [])];
     const occupied = new Set();
+    
+    // Mark existing placements as occupied
+    placements.forEach(ship => {
+      ship.positions.forEach(pos => occupied.add(pos));
+    });
+    
+    // Get list of ships that still need to be placed
+    const placedShipNames = placements.map(ship => ship.name);
+    const remainingShips = SHIP_CONFIG.filter(shipConfig => 
+      !placedShipNames.includes(shipConfig.name)
+    );
     
     const seededRandom = this.randomGenerators[playerId];
     
-    SHIP_CONFIG.forEach(shipConfig => {
+    // Only place remaining ships
+    remainingShips.forEach(shipConfig => {
       let placed = false;
       let attempts = 0;
       
@@ -683,6 +710,9 @@ class SeaBattleGame {
   updateBoard(playerId, placements) {
     const player = this.players[playerId];
     if (!player || player.ready || player.isBot) return;
+    
+    // Store partial placements
+    this.partialPlacements[playerId] = placements || [];
 
     const gridSize = GRID_SIZE;
     const cols = GRID_COLS;
@@ -857,12 +887,73 @@ class SeaBattleGame {
       }
     });
 
-    if (this.players[this.turn].isBot) {
-      const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
-      setTimeout(() => {
-        this.botFireShot(this.turn);
-      }, thinkingTime);
+    // Start the firing timer for the current player
+    this.startFireTimer(this.turn);
+  }
+  
+  startFireTimer(playerId) {
+    // Clear any existing timer
+    if (this.fireTimers[playerId]) {
+      clearTimeout(this.fireTimers[playerId]);
     }
+    
+    if (this.players[playerId].isBot) {
+      // Bot fires after thinking time
+      const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
+      this.fireTimers[playerId] = setTimeout(() => {
+        this.botFireShot(playerId);
+      }, thinkingTime);
+    } else {
+      // Human player has 15 seconds to fire
+      io.to(playerId).emit('fireTimer', { timeLeft: FIRE_TIME_LIMIT });
+      
+      this.fireTimers[playerId] = setTimeout(() => {
+        if (this.turn === playerId && !this.winner) {
+          console.log(`Player ${playerId} timed out, auto-firing with 20% hit chance`);
+          this.autoFire(playerId);
+        }
+      }, FIRE_TIME_LIMIT * 1000);
+    }
+  }
+  
+  autoFire(playerId) {
+    const opponentId = Object.keys(this.players).find(id => id !== playerId);
+    const opponent = this.players[opponentId];
+    
+    // Get all available positions
+    const availablePositions = [];
+    const shipPositions = [];
+    
+    for (let i = 0; i < GRID_SIZE; i++) {
+      if (opponent.board[i] !== 'hit' && opponent.board[i] !== 'miss') {
+        availablePositions.push(i);
+        if (opponent.board[i] === 'ship') {
+          shipPositions.push(i);
+        }
+      }
+    }
+    
+    if (availablePositions.length === 0) return;
+    
+    let targetPosition;
+    
+    // 20% chance to hit a ship, 80% chance to miss
+    if (Math.random() < 0.2 && shipPositions.length > 0) {
+      // Hit a ship
+      targetPosition = shipPositions[Math.floor(Math.random() * shipPositions.length)];
+    } else {
+      // Miss - pick a random water position
+      const waterPositions = availablePositions.filter(pos => opponent.board[pos] === 'water');
+      if (waterPositions.length > 0) {
+        targetPosition = waterPositions[Math.floor(Math.random() * waterPositions.length)];
+      } else {
+        // If no water positions, pick any available position
+        targetPosition = availablePositions[Math.floor(Math.random() * availablePositions.length)];
+      }
+    }
+    
+    // Fire the shot
+    this.fireShot(playerId, targetPosition);
   }
 
   _isValidPosition(pos, botState, opponent) {
@@ -1267,6 +1358,12 @@ class SeaBattleGame {
 
   fireShot(playerId, position) {
     if (this.winner || playerId !== this.turn) return false;
+    
+    // Clear the fire timer for this player
+    if (this.fireTimers[playerId]) {
+      clearTimeout(this.fireTimers[playerId]);
+      delete this.fireTimers[playerId];
+    }
 
     const opponentId = Object.keys(this.players).find(id => id !== playerId);
     const opponent = this.players[opponentId];
@@ -1339,12 +1436,13 @@ class SeaBattleGame {
       this.turn = opponentId;
       io.to(this.id).emit('nextTurn', { turn: this.turn });
       
-      if (this.players[this.turn].isBot) {
-        const thinkingTime = Math.floor(Math.random() * 2000) + 1000;
-        setTimeout(() => this.botFireShot(this.turn), thinkingTime);
-      }
+      // Start fire timer for next player
+      this.startFireTimer(this.turn);
     } else {
       io.to(this.id).emit('nextTurn', { turn: this.turn });
+      
+      // Start fire timer for same player (they get another turn)
+      this.startFireTimer(this.turn);
     }
 
     return true;
@@ -1440,10 +1538,51 @@ class SeaBattleGame {
     }
   }
 
+  handleDisconnect(playerId) {
+    if (this.winner || !this.players[playerId]) return;
+    
+    this.playerConnected[playerId] = false;
+    console.log(`Player ${playerId} disconnected from game ${this.id}`);
+    
+    // Start disconnect timer
+    this.disconnectTimers[playerId] = setTimeout(() => {
+      if (!this.playerConnected[playerId] && !this.winner) {
+        const opponentId = Object.keys(this.players).find(id => id !== playerId && !this.players[id].isBot);
+        
+        if (opponentId) {
+          console.log(`Player ${playerId} failed to reconnect, awarding win to ${opponentId}`);
+          this.endGame(opponentId);
+        } else {
+          // Only bots left, clean up
+          this.cleanup();
+        }
+      }
+    }, DISCONNECT_TIMEOUT * 1000);
+  }
+  
+  handleReconnect(playerId) {
+    if (this.disconnectTimers[playerId]) {
+      clearTimeout(this.disconnectTimers[playerId]);
+      delete this.disconnectTimers[playerId];
+    }
+    
+    this.playerConnected[playerId] = true;
+    console.log(`Player ${playerId} reconnected to game ${this.id}`);
+  }
+  
   cleanup() {
     Object.keys(this.placementTimers).forEach(playerId => {
       clearTimeout(this.placementTimers[playerId]);
     });
+    
+    Object.keys(this.fireTimers).forEach(playerId => {
+      clearTimeout(this.fireTimers[playerId]);
+    });
+    
+    Object.keys(this.disconnectTimers).forEach(playerId => {
+      clearTimeout(this.disconnectTimers[playerId]);
+    });
+    
     if (this.matchmakingTimerInterval) {
       clearInterval(this.matchmakingTimerInterval);
       this.matchmakingTimerInterval = null;
@@ -1462,6 +1601,14 @@ class SeaBattleGame {
 
 io.on('connection', (socket) => {
   console.log('New connection:', socket.id);
+  
+  // Check if this is a reconnection
+  Object.values(games).forEach(game => {
+    if (game.players[socket.id] && !game.players[socket.id].isBot) {
+      game.handleReconnect(socket.id);
+    }
+  });
+  
   socket.on('error', (error) => {
     console.error('Socket error:', error);
     socket.emit('error', { message: 'An error occurred. Please try again.' });
@@ -1607,13 +1754,8 @@ io.on('connection', (socket) => {
     console.log('Disconnected:', socket.id);
     Object.values(games).forEach(game => {
       if (game.players[socket.id]) {
-        const opponentId = Object.keys(game.players).find(id => id !== socket.id);
-        if (opponentId && !game.winner) {
-          io.to(opponentId).emit('gameEnd', { 
-            message: 'Player disconnected',
-          });
-        }
-        delete game.players[socket.id];
+        // Handle disconnect with timeout instead of immediate game end
+        game.handleDisconnect(socket.id);
         
         if (game.placementTimers[socket.id]) {
           clearTimeout(game.placementTimers[socket.id]);
