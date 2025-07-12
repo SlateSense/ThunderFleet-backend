@@ -1401,38 +1401,34 @@ class SeaBattleGame {
         // Process payments using instant send API
         console.log(`Processing instant payment to winner: ${winnerAddress}, amount: ${payout.winner} SATS`);
         
-        // Convert SATS to USD for instant send (approximate conversion, you may want to get real-time rates)
-        const satsToUsdRate = 0.0003; // Approximate rate, update as needed
-        const winnerAmountUsd = payout.winner * satsToUsdRate;
-        
+        // Send SATS directly without conversion
         const winnerPayment = await sendInstantPayment(
           winnerAddress,
-          winnerAmountUsd,
-          'USD',
+          payout.winner,
+          'SATS',
           'SATS',
           `Sea Battle payout - Game ${this.id} - Winner: ${payout.winner} SATS`
         );
         console.log('Winner instant payment sent:', winnerPayment);
 
-        const winnerFee = payout.winner * 0.01;
-        const platformFeeUsd = (payout.platformFee + winnerFee) * satsToUsdRate;
+        // Send platform fee (no extra winner fee)
         const platformFee = await sendInstantPayment(
           'slatesense@speed.app',
-          platformFeeUsd,
-          'USD',
+          payout.platformFee,
           'SATS',
-          `Sea Battle platform fee - Game ${this.id} - Total: ${payout.platformFee + winnerFee} SATS`
+          'SATS',
+          `Sea Battle platform fee - Game ${this.id} - Fee: ${payout.platformFee} SATS`
         );
         console.log('Platform fee instant payment sent:', platformFee);
 
         // Confirm payment transaction to the client
         io.to(this.id).emit('transaction', {
-          message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee + winnerFee} sats total platform fee.`,
+          message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee} sats platform fee.`,
         });
 
         console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
         console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
-        console.log(`Platform fee processed: ${payout.platformFee + winnerFee} SATS to slatesense@tryspeed.com`);
+        console.log(`Platform fee processed: ${payout.platformFee} SATS to slatesense@speed.app`);
       }
     } catch (error) {
       console.error('Payment error:', error.message);
