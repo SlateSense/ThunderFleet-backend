@@ -1700,26 +1700,9 @@ io.on('connection', (socket) => {
         console.log(`Socket ${socket.id} disconnected, removed from invoiceToSocket`);
       });
 
-      const game = Object.values(games).find(g => 
-        g.betAmount === betAmount && Object.keys(g.players).length < 2,
-      ) || new SeaBattleGame(crypto.randomBytes(16).toString('hex'), betAmount);
-
-      if (!games[game.id]) {
-        games[game.id] = game;
-      }
-
-      const botDelay = BOT_JOIN_DELAYS[
-        Math.floor(Math.random() * BOT_JOIN_DELAYS.length)
-      ];
-
-      const botTimer = setTimeout(() => {
-        if (Object.keys(game.players).length === 1) {
-          const botId = `bot-${Date.now()}`;
-          game.addPlayer(botId, 'bot@thunderfleet.com', true);
-        }
-      }, botDelay);
-
-      game.botTimer = botTimer;
+      // Don't create game yet - wait for payment verification
+      // Store game reference for payment webhook
+      players[socket.id].pendingGameSettings = { betAmount };
     } catch (error) {
       console.error('Join game error:', error);
       socket.emit('error', { message: error.message });
