@@ -585,16 +585,16 @@ class SeaBattleGame {
       const allPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
       allPlayers.forEach(playerId => {
         io.to(playerId).emit('waitingForOpponent', { 
-          message: 'Opponent found! Game starting in 10 seconds...',
+          message: 'Opponent found! Game starting in 5 seconds...',
           countdown: true,
-          timeLeft: 10
+          timeLeft: 5
         });
       });
       
       console.log(`Game ${this.id}: Both players joined, starting countdown`);
       
       // Send countdown updates
-      let timeLeft = 10;
+      let timeLeft = 5;
       const countdownInterval = setInterval(() => {
         timeLeft--;
         if (timeLeft > 0) {
