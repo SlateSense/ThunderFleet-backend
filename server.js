@@ -674,10 +674,11 @@ class SeaBattleGame {
         for (let i = 0; i < shipConfig.size; i++) {
           const pos = horizontal ? row * cols + col + i : (row + i) * cols + col;
           
-          if (pos >= gridSize || 
+if (pos >= gridSize || 
               (horizontal && col + shipConfig.size > cols) || 
               (!horizontal && row + shipConfig.size > rows) || 
-              occupied.has(pos)) {
+              occupied.has(pos) || 
+              positions.includes(pos)) {
             valid = false;
             break;
           }
