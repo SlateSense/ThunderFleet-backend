@@ -665,7 +665,11 @@ class SeaBattleGame {
       !placedShipNames.includes(shipConfig.name)
     );
     
-    const seededRandom = this.randomGenerators[playerId];
+    // Create a fresh random generator for this auto-placement session
+    const baseSeed = playerId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const freshSeed = baseSeed + Date.now() + Math.random() * 1000;
+    const freshRandom = mulberry32(freshSeed);
+    console.log(`Auto-placing ships for ${playerId} with fresh seed: ${freshSeed}`);
     
     // Only place remaining ships
 const newlyPlacedShips = [];
@@ -673,20 +677,23 @@ const newlyPlacedShips = [];
       let placed = false;
       let attempts = 0;
       
+      console.log(`Attempting to place ${shipConfig.name} (size: ${shipConfig.size})`);
       while (!placed && attempts < 100) {
         attempts++;
-        const horizontal = seededRandom() > 0.5;
+        const horizontal = freshRandom() > 0.5;
         let row, col;
         
         // Randomize starting position based on ship orientation and size
         // Ensure starting position allows the entire ship to fit
         if (horizontal) {
-          row = Math.floor(seededRandom() * rows);
-          col = Math.floor(seededRandom() * Math.max(1, cols - shipConfig.size + 1));
+          row = Math.floor(freshRandom() * rows);
+          col = Math.floor(freshRandom() * Math.max(1, cols - shipConfig.size + 1));
         } else {
-          row = Math.floor(seededRandom() * Math.max(1, rows - shipConfig.size + 1));
-          col = Math.floor(seededRandom() * cols);
+          row = Math.floor(freshRandom() * Math.max(1, rows - shipConfig.size + 1));
+          col = Math.floor(freshRandom() * cols);
         }
+        
+        console.log(`Attempt ${attempts}: trying to place ${shipConfig.name} at row ${row}, col ${col}, horizontal: ${horizontal}`);
         
         const positions = [];
         let valid = true;
@@ -723,8 +730,13 @@ const newlyPlacedShips = [];
           };
           placements.push(newShip);
           newlyPlacedShips.push(newShip);
+          console.log(`Successfully placed ${shipConfig.name} at positions: ${positions} (horizontal: ${horizontal})`);
           placed = true;
         }
+      }
+      
+      if (!placed) {
+        console.log(`Failed to place ship ${shipConfig.name} after 100 attempts`);
       }
     });
     
