@@ -821,141 +821,152 @@ class SeaBattleGame {
   }
 
   autoPlaceShips(playerId) {
-    const player = this.players[playerId];
-    const gridSize = GRID_SIZE;
-    const cols = GRID_COLS;
-    const rows = GRID_ROWS;
-    
-    // Start with existing partial placements
-    const placements = [...(this.partialPlacements[playerId] || [])];
-    const occupied = new Set();
-    
-    // Mark existing placements as occupied
-    placements.forEach(ship => {
-      ship.positions.forEach(pos => occupied.add(pos));
-    });
-    
-    // Get list of ships that still need to be placed
-    const placedShipNames = placements.map(ship => ship.name);
-    const remainingShips = SHIP_CONFIG.filter(shipConfig => 
-      !placedShipNames.includes(shipConfig.name)
-    );
-    
-    // Create a fresh random generator for this auto-placement session
-    const baseSeed = playerId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const freshSeed = baseSeed + Date.now() + Math.random() * 1000;
-    const freshRandom = mulberry32(freshSeed);
-    console.log(`Auto-placing ships for ${playerId} with fresh seed: ${freshSeed}`);
-    
-    // Only place remaining ships
-const newlyPlacedShips = [];
-    remainingShips.forEach(shipConfig => {
-      let placed = false;
-      let attempts = 0;
-      
-      console.log(`Attempting to place ${shipConfig.name} (size: ${shipConfig.size})`);
-      while (!placed && attempts < 100) {
-        attempts++;
-        const horizontal = freshRandom() > 0.5;
-        let row, col;
-        
-        // Randomize starting position based on ship orientation and size
-        // Ensure starting position allows the entire ship to fit
-        if (horizontal) {
-          const maxCol = cols - shipConfig.size;
-          row = Math.floor(freshRandom() * rows);
-          col = maxCol > 0 ? Math.floor(freshRandom() * (maxCol + 1)) : 0;
-        } else {
-          const maxRow = rows - shipConfig.size;
-          row = maxRow > 0 ? Math.floor(freshRandom() * (maxRow + 1)) : 0;
-          col = Math.floor(freshRandom() * cols);
-        }
-        
-        console.log(`Attempt ${attempts}: trying to place ${shipConfig.name} at row ${row}, col ${col}, horizontal: ${horizontal}`);
-        
-        const positions = [];
-        let valid = true;
-
-        for (let i = 0; i < shipConfig.size; i++) {
-          const currentPos = horizontal ? row * cols + col + i : (row + i) * cols + col;
-          
-          // Additional check to ensure we don't go out of bounds
-          if (currentPos >= gridSize || occupied.has(currentPos)) {
-            valid = false;
-            console.log(`Attempt ${attempts}: Position ${currentPos} out of bounds or occupied for ${shipConfig.name}`);
-            break;
-          }
-          
-          // For horizontal ships, ensure we don't wrap to next row
-          if (horizontal) {
-            const currentRow = Math.floor(currentPos / cols);
-            if (currentRow !== row) {
-              valid = false;
-              console.log(`Attempt ${attempts}: Ship ${shipConfig.name} would wrap to next row`);
-              break;
-            }
-          }
-          
-          positions.push(currentPos);
-        }
-
-        if (valid) {
-          positions.forEach(pos => occupied.add(pos));
-          const newShip = {
-            name: shipConfig.name,
-            positions,
-            horizontal,
-            sunk: false,
-            hits: 0,
-          };
-          placements.push(newShip);
-          newlyPlacedShips.push(newShip);
-          console.log(`Successfully placed ${shipConfig.name} at positions: ${positions} (horizontal: ${horizontal})`);
-          placed = true;
-        }
+    try {
+      const player = this.players[playerId];
+      if (!player) {
+        console.error(`Player ${playerId} not found for auto-placement`);
+        return;
       }
       
-      if (!placed) {
-        console.log(`Failed to place ship ${shipConfig.name} after 100 attempts`);
-      }
-    });
-    
-    player.board = Array(gridSize).fill('water');
-    placements.forEach(ship => {
-      ship.positions.forEach(pos => {
-        player.board[pos] = 'ship';
-      });
-    });
-    
-    player.ships = placements;
-    
-    // Always send updated data to human players
-    if (!player.isBot) {
-      console.log(`Sending updated ship placement to player ${playerId}:`, {
-        totalShips: placements.length,
-        shipNames: placements.map(s => s.name),
-        boardCellsWithShips: player.board.filter(cell => cell === 'ship').length
+      const gridSize = GRID_SIZE;
+      const cols = GRID_COLS;
+      const rows = GRID_ROWS;
+      
+      // Start with existing partial placements
+      const placements = [...(this.partialPlacements[playerId] || [])];
+      const occupied = new Set();
+      
+      // Mark existing placements as occupied
+      placements.forEach(ship => {
+        ship.positions.forEach(pos => occupied.add(pos));
       });
       
-      io.to(playerId).emit('games', { 
-        count: Object.values(this.players).filter(p => p.ready).length,
-        grid: player.board,
-        ships: placements,
-      });
-      
-      // Also emit a specific event for auto-placed ships
-      const newlyPlacedShips = placements.filter(ship => 
-        !this.partialPlacements[playerId]?.some(partial => partial.name === ship.name)
+      // Get list of ships that still need to be placed
+      const placedShipNames = placements.map(ship => ship.name);
+      const remainingShips = SHIP_CONFIG.filter(shipConfig => 
+        !placedShipNames.includes(shipConfig.name)
       );
       
-      if (newlyPlacedShips.length > 0) {
-        console.log(`Auto-placed ${newlyPlacedShips.length} new ships for ${playerId}:`, newlyPlacedShips.map(s => s.name));
-        io.to(playerId).emit('shipsAutoPlaced', {
-          newShips: newlyPlacedShips,
-          allShips: placements,
-          grid: player.board
+      // Create a fresh random generator for this auto-placement session
+      const baseSeed = playerId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const freshSeed = baseSeed + Date.now() + Math.random() * 1000;
+      const freshRandom = mulberry32(freshSeed);
+      console.log(`Auto-placing ships for ${playerId} with fresh seed: ${freshSeed}`);
+      
+      // Only place remaining ships
+      const newlyPlacedShips = [];
+      remainingShips.forEach(shipConfig => {
+        let placed = false;
+        let attempts = 0;
+        
+        console.log(`Attempting to place ${shipConfig.name} (size: ${shipConfig.size})`);
+        while (!placed && attempts < 100) {
+          attempts++;
+          const horizontal = freshRandom() > 0.5;
+          let row, col;
+          
+          // Randomize starting position based on ship orientation and size
+          // Ensure starting position allows the entire ship to fit
+          if (horizontal) {
+            const maxCol = cols - shipConfig.size;
+            row = Math.floor(freshRandom() * rows);
+            col = maxCol > 0 ? Math.floor(freshRandom() * (maxCol + 1)) : 0;
+          } else {
+            const maxRow = rows - shipConfig.size;
+            row = maxRow > 0 ? Math.floor(freshRandom() * (maxRow + 1)) : 0;
+            col = Math.floor(freshRandom() * cols);
+          }
+          
+          console.log(`Attempt ${attempts}: trying to place ${shipConfig.name} at row ${row}, col ${col}, horizontal: ${horizontal}`);
+          
+          const positions = [];
+          let valid = true;
+
+          for (let i = 0; i < shipConfig.size; i++) {
+            const currentPos = horizontal ? row * cols + col + i : (row + i) * cols + col;
+            
+            // Additional check to ensure we don't go out of bounds
+            if (currentPos >= gridSize || occupied.has(currentPos)) {
+              valid = false;
+              console.log(`Attempt ${attempts}: Position ${currentPos} out of bounds or occupied for ${shipConfig.name}`);
+              break;
+            }
+            
+            // For horizontal ships, ensure we don't wrap to next row
+            if (horizontal) {
+              const currentRow = Math.floor(currentPos / cols);
+              if (currentRow !== row) {
+                valid = false;
+                console.log(`Attempt ${attempts}: Ship ${shipConfig.name} would wrap to next row`);
+                break;
+              }
+            }
+            
+            positions.push(currentPos);
+          }
+
+          if (valid) {
+            positions.forEach(pos => occupied.add(pos));
+            const newShip = {
+              name: shipConfig.name,
+              positions,
+              horizontal,
+              sunk: false,
+              hits: 0,
+            };
+            placements.push(newShip);
+            newlyPlacedShips.push(newShip);
+            console.log(`Successfully placed ${shipConfig.name} at positions: ${positions} (horizontal: ${horizontal})`);
+            placed = true;
+          }
+        }
+        
+        if (!placed) {
+          console.log(`Failed to place ship ${shipConfig.name} after 100 attempts`);
+        }
+      });
+      
+      player.board = Array(gridSize).fill('water');
+      placements.forEach(ship => {
+        ship.positions.forEach(pos => {
+          player.board[pos] = 'ship';
         });
+      });
+      
+      player.ships = placements;
+      
+      // Always send updated data to human players
+      if (!player.isBot) {
+        console.log(`Sending updated ship placement to player ${playerId}:`, {
+          totalShips: placements.length,
+          shipNames: placements.map(s => s.name),
+          boardCellsWithShips: player.board.filter(cell => cell === 'ship').length
+        });
+        
+        io.to(playerId).emit('games', { 
+          count: Object.values(this.players).filter(p => p.ready).length,
+          grid: player.board,
+          ships: placements,
+        });
+        
+        // Also emit a specific event for auto-placed ships
+        const autoPlacedShips = placements.filter(ship => 
+          !this.partialPlacements[playerId]?.some(partial => partial.name === ship.name)
+        );
+        
+        if (autoPlacedShips.length > 0) {
+          console.log(`Auto-placed ${autoPlacedShips.length} new ships for ${playerId}:`, autoPlacedShips.map(s => s.name));
+          io.to(playerId).emit('shipsAutoPlaced', {
+            newShips: autoPlacedShips,
+            allShips: placements,
+            grid: player.board
+          });
+        }
       }
+    } catch (error) {
+      console.error('Auto-placement error:', error.message);
+      this.players[playerId].ready = false;
+      io.to(playerId).emit('error', { message: 'Auto-placement failed. Please try again.' });
     }
   }
 
