@@ -659,7 +659,6 @@ class SeaBattleGame {
     placements.forEach(ship => {
       ship.positions.forEach(pos => occupied.add(pos));
     });
-    });
     
     // Get list of ships that still need to be placed
     const placedShipNames = placements.map(ship => ship.name);
