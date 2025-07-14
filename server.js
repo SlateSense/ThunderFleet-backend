@@ -965,10 +965,10 @@ class SeaBattleGame {
     
     if (availablePositions.length === 0) return;
     
-    let targetPosition;
+let targetPosition = null;
     
     // 20% chance to hit a ship, 80% chance to miss
-    if (Math.random() < 0.2 && shipPositions.length > 0) {
+if (Math.random() < 0.05 && shipPositions.length > 0) {
       // Hit a ship
       targetPosition = shipPositions[Math.floor(Math.random() * shipPositions.length)];
     } else {
