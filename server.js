@@ -501,6 +501,15 @@ function mulberry32(a) {
   };
 }
 
+function isOccupied(positions, occupied) {
+  for (const pos of positions) {
+    if (occupied.has(pos)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 class SeaBattleGame {
   constructor(id, betAmount) {
     this.id = id;
@@ -659,41 +668,44 @@ class SeaBattleGame {
     const seededRandom = this.randomGenerators[playerId];
     
     // Only place remaining ships
+const newlyPlacedShips = [];
     remainingShips.forEach(shipConfig => {
       let placed = false;
       let attempts = 0;
-      
-      while (!placed && attempts < 100) {
+
+      while (!placed && attempts < 200) {
         attempts++;
         const horizontal = seededRandom() > 0.5;
         const row = Math.floor(seededRandom() * rows);
         const col = Math.floor(seededRandom() * cols);
         const positions = [];
         let valid = true;
-        
+
         for (let i = 0; i < shipConfig.size; i++) {
-          const pos = horizontal ? row * cols + col + i : (row + i) * cols + col;
-          
-if (pos >= gridSize || 
-              (horizontal && col + shipConfig.size > cols) || 
-              (!horizontal && row + shipConfig.size > rows) || 
-              occupied.has(pos) || 
-              positions.includes(pos)) {
+          const currentPos = horizontal ? row * cols + col + i : (row + i) * cols + col;
+          if (
+            currentPos >= gridSize ||
+            (horizontal && col + shipConfig.size > cols) ||
+            (!horizontal && row + shipConfig.size > rows) ||
+            occupied.has(currentPos)
+          ) {
             valid = false;
             break;
           }
-          positions.push(pos);
+          positions.push(currentPos);
         }
-        
+
         if (valid) {
           positions.forEach(pos => occupied.add(pos));
-          placements.push({
+          const newShip = {
             name: shipConfig.name,
             positions,
             horizontal,
             sunk: false,
             hits: 0,
-          });
+          };
+          placements.push(newShip);
+          newlyPlacedShips.push(newShip);
           placed = true;
         }
       }
