@@ -686,10 +686,12 @@ const newlyPlacedShips = [];
         // Randomize starting position based on ship orientation and size
         // Ensure starting position allows the entire ship to fit
         if (horizontal) {
+          const maxCol = cols - shipConfig.size;
           row = Math.floor(freshRandom() * rows);
-          col = Math.floor(freshRandom() * Math.max(1, cols - shipConfig.size + 1));
+          col = maxCol > 0 ? Math.floor(freshRandom() * (maxCol + 1)) : 0;
         } else {
-          row = Math.floor(freshRandom() * Math.max(1, rows - shipConfig.size + 1));
+          const maxRow = rows - shipConfig.size;
+          row = maxRow > 0 ? Math.floor(freshRandom() * (maxRow + 1)) : 0;
           col = Math.floor(freshRandom() * cols);
         }
         
