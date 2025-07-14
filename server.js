@@ -653,10 +653,12 @@ class SeaBattleGame {
     // Start with existing partial placements
     const placements = [...(this.partialPlacements[playerId] || [])];
     const occupied = new Set();
-    
-    // Mark existing placements as occupied
+
+    this.randomGenerators[playerId] = mulberry32(Date.now());
+
     placements.forEach(ship => {
       ship.positions.forEach(pos => occupied.add(pos));
+    });
     });
     
     // Get list of ships that still need to be placed
