@@ -733,6 +733,7 @@ const newlyPlacedShips = [];
           // Additional check to ensure we don't go out of bounds
           if (currentPos >= gridSize || occupied.has(currentPos)) {
             valid = false;
+            console.log(`Attempt ${attempts}: Position ${currentPos} out of bounds or occupied for ${shipConfig.name}`);
             break;
           }
           
@@ -741,6 +742,7 @@ const newlyPlacedShips = [];
             const currentRow = Math.floor(currentPos / cols);
             if (currentRow !== row) {
               valid = false;
+              console.log(`Attempt ${attempts}: Ship ${shipConfig.name} would wrap to next row`);
               break;
             }
           }
@@ -808,6 +810,50 @@ const newlyPlacedShips = [];
     }
   }
 
+  validateShipPlacements(playerId, placements) {
+    const player = this.players[playerId];
+    if (!player || player.ready || player.isBot) {
+      return { success: false, error: 'Player not valid or ready' };
+    }
+    
+    const gridSize = GRID_SIZE;
+    const cols = GRID_COLS;
+    const rows = GRID_ROWS;
+    const occupied = new Set();
+
+    for (const ship of placements) {
+      const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
+      if (!matchingConfig) {
+        return { success: false, error: `Unknown ship: ${ship.name}` };
+      }
+      if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size) {
+        return { success: false, error: `Invalid ship positions length for ${ship.name}. Expected ${matchingConfig.size}, got ${ship.positions.length}` };
+      }
+
+      const isHorizontal = ship.horizontal !== undefined ? ship.horizontal : true;
+      for (let i = 0; i < ship.positions.length; i++) {
+        const pos = ship.positions[i];
+        if (pos < 0 || pos >= gridSize) {
+          return { success: false, error: `Position ${pos} out of bounds for ${ship.name}` };
+        }
+        const row = Math.floor(pos / cols);
+        const col = pos % cols;
+        if (isHorizontal && (i > 0 && col !== ship.positions[i - 1] % cols + 1)) {
+          return { success: false, error: `Invalid horizontal alignment for ${ship.name} at position ${pos}` };
+        }
+        if (!isHorizontal && (i > 0 && row !== Math.floor(ship.positions[i - 1] / cols) + 1)) {
+          return { success: false, error: `Invalid vertical alignment for ${ship.name} at position ${pos}` };
+        }
+        if (occupied.has(pos)) {
+          return { success: false, error: `Position ${pos} already occupied for ${ship.name}` };
+        }
+        occupied.add(pos);
+      }
+    }
+    
+    return { success: true };
+  }
+  
   updateBoard(playerId, placements) {
     const player = this.players[playerId];
     if (!player || player.ready || player.isBot) return;
@@ -819,32 +865,41 @@ const newlyPlacedShips = [];
     const cols = GRID_COLS;
     const rows = GRID_ROWS;
     const occupied = new Set();
+    const logRejection = (reason, details) => {
+      console.error(`Placement rejected: ${reason}`, details);
+    };
 
     for (const ship of placements) {
       const matchingConfig = SHIP_CONFIG.find(s => s.name === ship.name);
       if (!matchingConfig) {
-        throw new Error(`Unknown ship: ${ship.name}`);
+        logRejection('Unknown ship', { name: ship.name });
+        return;
       }
       if (!ship.positions || !Array.isArray(ship.positions) || ship.positions.length !== matchingConfig.size) {
-        throw new Error(`Invalid ship positions length for ${ship.name}. Expected ${matchingConfig.size}, got ${ship.positions.length}`);
+        logRejection('Invalid ship positions length', { name: ship.name, expected: matchingConfig.size, got: ship.positions.length });
+        return;
       }
 
       const isHorizontal = ship.horizontal !== undefined ? ship.horizontal : true;
       for (let i = 0; i < ship.positions.length; i++) {
         const pos = ship.positions[i];
         if (pos < 0 || pos >= gridSize) {
-          throw new Error(`Position ${pos} out of bounds for ${ship.name}`);
+          logRejection('Position out of bounds', { name: ship.name, position: pos });
+          return;
         }
         const row = Math.floor(pos / cols);
         const col = pos % cols;
         if (isHorizontal && (i > 0 && col !== ship.positions[i - 1] % cols + 1)) {
-          throw new Error(`Invalid horizontal alignment for ${ship.name} at position ${pos}`);
+          logRejection('Invalid horizontal alignment', { name: ship.name, position: pos });
+          return;
         }
         if (!isHorizontal && (i > 0 && row !== Math.floor(ship.positions[i - 1] / cols) + 1)) {
-          throw new Error(`Invalid vertical alignment for ${ship.name} at position ${pos}`);
+          logRejection('Invalid vertical alignment', { name: ship.name, position: pos });
+          return;
         }
         if (occupied.has(pos)) {
-          throw new Error(`Position ${pos} already occupied for ${ship.name}`);
+          logRejection('Position already occupied', { name: ship.name, position: pos });
+          return;
         }
         occupied.add(pos);
       }
@@ -1794,15 +1849,22 @@ io.on('connection', (socket) => {
     try {
       const game = games[gameId];
       if (game) {
-        game.updateBoard(playerId, placements);
-        socket.emit('updateBoard', { success: true });
+        // Validate ship placements
+        const result = game.validateShipPlacements(playerId, placements);
+        if (result.success) {
+          game.updateBoard(playerId, placements);
+          socket.emit('updateBoard', { success: true });
+        } else {
+          console.error('Server rejected placement:', result.error);
+          socket.emit('updateBoard', { success: false, error: result.error });
+        }
       } else {
         throw new Error('Game not found');
       }
     } catch (error) {
       console.error('Update board error:', error.message);
       socket.emit('error', { message: 'Failed to update board: ' + error.message });
-      socket.emit('updateBoard', { success: false });
+      socket.emit('updateBoard', { success: false, error: error.message });
     }
   });
   
