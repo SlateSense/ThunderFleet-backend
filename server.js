@@ -580,9 +580,36 @@ class SeaBattleGame {
         clearInterval(this.matchmakingTimerInterval);
         this.matchmakingTimerInterval = null;
       }
-      setTimeout(() => {
-        this.startPlacing();
-      }, 10000);
+      
+      // Send waiting message to both players with countdown
+      const allPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
+      allPlayers.forEach(playerId => {
+        io.to(playerId).emit('waitingForOpponent', { 
+          message: 'Opponent found! Game starting in 10 seconds...',
+          countdown: true,
+          timeLeft: 10
+        });
+      });
+      
+      console.log(`Game ${this.id}: Both players joined, starting countdown`);
+      
+      // Send countdown updates
+      let timeLeft = 10;
+      const countdownInterval = setInterval(() => {
+        timeLeft--;
+        if (timeLeft > 0) {
+          allPlayers.forEach(playerId => {
+            io.to(playerId).emit('waitingForOpponent', { 
+              message: `Game starting in ${timeLeft} second${timeLeft !== 1 ? 's' : ''}...`,
+              countdown: true,
+              timeLeft: timeLeft
+            });
+          });
+        } else {
+          clearInterval(countdownInterval);
+          this.startPlacing();
+        }
+      }, 1000);
     } else {
       this.startMatchmaking();
     }
