@@ -653,9 +653,8 @@ class SeaBattleGame {
     // Start with existing partial placements
     const placements = [...(this.partialPlacements[playerId] || [])];
     const occupied = new Set();
-
-    this.randomGenerators[playerId] = mulberry32(Date.now());
-
+    
+    // Mark existing placements as occupied
     placements.forEach(ship => {
       ship.positions.forEach(pos => occupied.add(pos));
     });
@@ -673,26 +672,43 @@ const newlyPlacedShips = [];
     remainingShips.forEach(shipConfig => {
       let placed = false;
       let attempts = 0;
-
-      while (!placed && attempts < 200) {
+      
+      while (!placed && attempts < 100) {
         attempts++;
         const horizontal = seededRandom() > 0.5;
-        const row = Math.floor(seededRandom() * rows);
-        const col = Math.floor(seededRandom() * cols);
+        let row, col;
+        
+        // Randomize starting position based on ship orientation and size
+        // Ensure starting position allows the entire ship to fit
+        if (horizontal) {
+          row = Math.floor(seededRandom() * rows);
+          col = Math.floor(seededRandom() * Math.max(1, cols - shipConfig.size + 1));
+        } else {
+          row = Math.floor(seededRandom() * Math.max(1, rows - shipConfig.size + 1));
+          col = Math.floor(seededRandom() * cols);
+        }
+        
         const positions = [];
         let valid = true;
 
         for (let i = 0; i < shipConfig.size; i++) {
           const currentPos = horizontal ? row * cols + col + i : (row + i) * cols + col;
-          if (
-            currentPos >= gridSize ||
-            (horizontal && col + shipConfig.size > cols) ||
-            (!horizontal && row + shipConfig.size > rows) ||
-            occupied.has(currentPos)
-          ) {
+          
+          // Additional check to ensure we don't go out of bounds
+          if (currentPos >= gridSize || occupied.has(currentPos)) {
             valid = false;
             break;
           }
+          
+          // For horizontal ships, ensure we don't wrap to next row
+          if (horizontal) {
+            const currentRow = Math.floor(currentPos / cols);
+            if (currentRow !== row) {
+              valid = false;
+              break;
+            }
+          }
+          
           positions.push(currentPos);
         }
 
