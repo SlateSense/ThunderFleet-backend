@@ -28,6 +28,115 @@ console.log('Debug-2025-06-16-2: crypto loaded');
 const rateLimit = require('express-rate-limit');
 console.log('Debug-2025-06-16-2: express-rate-limit loaded');
 
+const winston = require('winston');
+require('winston-daily-rotate-file');
+console.log('Debug-2025-06-16-2: winston logging loaded');
+
+// Configure Winston logging
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    // Transaction logs - keep longer for compliance
+    new winston.transports.DailyRotateFile({
+      filename: 'logs/transactions-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxFiles: '90d',
+      maxSize: '20m',
+      archiveCompressed: true,
+      level: 'info'
+    }),
+    
+    // Game logs - general game events
+    new winston.transports.DailyRotateFile({
+      filename: 'logs/games-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxFiles: '30d',
+      maxSize: '20m',
+      archiveCompressed: true,
+      level: 'info'
+    }),
+    
+    // Error logs - keep longer for debugging
+    new winston.transports.DailyRotateFile({
+      filename: 'logs/errors-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxFiles: '60d',
+      maxSize: '10m',
+      archiveCompressed: true,
+      level: 'error'
+    }),
+    
+    // Console output for development
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      )
+    })
+  ],
+});
+
+// Create separate loggers for different types of events
+const gameLogger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.label({ label: 'GAME' }),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.DailyRotateFile({
+      filename: 'logs/games-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxFiles: '30d',
+      maxSize: '20m',
+      archiveCompressed: true
+    })
+  ]
+});
+
+const transactionLogger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.label({ label: 'TRANSACTION' }),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.DailyRotateFile({
+      filename: 'logs/transactions-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxFiles: '90d',
+      maxSize: '20m',
+      archiveCompressed: true
+    })
+  ]
+});
+
+const playerLogger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.label({ label: 'PLAYER' }),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.DailyRotateFile({
+      filename: 'logs/players-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxFiles: '30d',
+      maxSize: '10m',
+      archiveCompressed: true
+    })
+  ]
+});
+
+console.log('Debug-2025-06-16-2: Winston logging configured');
+
 const app = express();
 console.log('Debug-2025-06-16-2: express app created');
 
@@ -77,15 +186,26 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
       case 'payment.confirmed':
         const invoiceId = event.data?.object?.id;
         if (!invoiceId) {
-          console.error('Webhook error: No invoiceId in webhook payload');
+          logger.error('Webhook error: No invoiceId in webhook payload');
           return res.status(400).send('No invoiceId in webhook payload');
         }
 
         const socket = invoiceToSocket[invoiceId];
         if (!socket) {
-          console.warn(`Webhook warning: No socket found for invoice ${invoiceId}. Player may have disconnected.`);
+          logger.warn(`Webhook warning: No socket found for invoice ${invoiceId}. Player may have disconnected.`);
           return res.status(200).send('Webhook received but no socket found');
         }
+
+        // Log payment verification
+        transactionLogger.info({
+          event: 'payment_verified',
+          playerId: socket.id,
+          invoiceId: invoiceId,
+          amount: players[socket.id]?.betAmount || 'unknown',
+          lightningAddress: players[socket.id]?.lightningAddress || 'unknown',
+          timestamp: new Date().toISOString(),
+          eventType: eventType
+        });
 
         socket.emit('paymentVerified');
         players[socket.id].paid = true;
@@ -99,6 +219,15 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
           const gameId = `game_${Date.now()}`;
           game = new SeaBattleGame(gameId, players[socket.id].betAmount);
           games[gameId] = game;
+          
+          // Log game creation
+          gameLogger.info({
+            event: 'game_created',
+            gameId: gameId,
+            betAmount: players[socket.id].betAmount,
+            playerId: socket.id,
+            timestamp: new Date().toISOString()
+          });
         }
         
         game.addPlayer(socket.id, players[socket.id].lightningAddress);
@@ -111,18 +240,29 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
       case 'payment.failed':
         const failedInvoiceId = event.data?.object?.id;
         if (!failedInvoiceId) {
-          console.error('Webhook error: No invoiceId in webhook payload for payment.failed');
+          logger.error('Webhook error: No invoiceId in webhook payload for payment.failed');
           return res.status(400).send('No invoiceId in webhook payload');
         }
 
         const failedSocket = invoiceToSocket[failedInvoiceId];
         if (failedSocket) {
+          // Log payment failure
+          transactionLogger.info({
+            event: 'payment_failed',
+            playerId: failedSocket.id,
+            invoiceId: failedInvoiceId,
+            amount: players[failedSocket.id]?.betAmount || 'unknown',
+            lightningAddress: players[failedSocket.id]?.lightningAddress || 'unknown',
+            timestamp: new Date().toISOString(),
+            eventType: eventType
+          });
+          
           failedSocket.emit('error', { message: 'Payment failed. Please try again.' });
           console.log(`Payment failed for player ${failedSocket.id}: ${failedInvoiceId}`);
           delete players[failedSocket.id];
           delete invoiceToSocket[failedInvoiceId];
         } else {
-          console.warn(`Webhook warning: No socket found for failed invoice ${failedInvoiceId}. Player may have disconnected.`);
+          logger.warn(`Webhook warning: No socket found for failed invoice ${failedInvoiceId}. Player may have disconnected.`);
         }
         break;
 
@@ -627,6 +767,15 @@ class SeaBattleGame {
         const botId = `bot_${Date.now()}`;
         this.addPlayer(botId, 'bot@tryspeed.com', true);
         console.log(`Added bot ${botId} to game ${this.id}`);
+        
+        // Log bot join
+        gameLogger.info({
+          event: 'bot_joined',
+          botId: botId,
+          gameId: this.id,
+          betAmount: this.betAmount,
+          timestamp: new Date().toISOString()
+        });
       }
     }, delay);
   }
@@ -1623,11 +1772,19 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     try {
       const winnerPlayer = this.players[playerId];
       if (!winnerPlayer) {
-        console.error(`Winner player with ID ${playerId} not found in game ${this.id}`);
+        logger.error(`Winner player with ID ${playerId} not found in game ${this.id}`);
         return;
       }
 
-// Ensure the address contains @speed.app
+      // Get all players for logging
+      const allPlayers = Object.keys(this.players).map(id => ({
+        id,
+        isBot: this.players[id].isBot,
+        lightningAddress: this.players[id].lightningAddress,
+        shipHits: this.shipHits[id] || 0
+      }));
+
+      // Ensure the address contains @speed.app
       let winnerAddress = winnerPlayer.lightningAddress.includes('@') ? winnerPlayer.lightningAddress : `${winnerPlayer.lightningAddress}@speed.app`;
 
       const payout = PAYOUTS[this.betAmount];
@@ -1638,6 +1795,22 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
 
       if (winnerPlayer.isBot) {
+        // Log bot victory
+        gameLogger.info({
+          event: 'game_ended',
+          gameId: this.id,
+          winner: playerId,
+          winnerType: 'bot',
+          betAmount: this.betAmount,
+          players: allPlayers,
+          payout: {
+            winner: 0, // Bot doesn't get payout
+            platformFee: 0, // No fee deducted
+            houseRetained: this.betAmount * 2 // Both bets retained
+          },
+          timestamp: new Date().toISOString()
+        });
+
         humanPlayers.forEach(id => {
           io.to(id).emit('gameEnd', {
             message: 'You lost! Better luck next time!',
@@ -1645,6 +1818,23 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         });
         console.log(`Bot ${playerId} won the game. Bet amount ${this.betAmount} SATS retained by the house.`);
       } else {
+        // Log human victory and payout details
+        gameLogger.info({
+          event: 'game_ended',
+          gameId: this.id,
+          winner: playerId,
+          winnerType: 'human',
+          winnerAddress: winnerAddress,
+          betAmount: this.betAmount,
+          players: allPlayers,
+          payout: {
+            winner: payout.winner,
+            platformFee: payout.platformFee,
+            totalCollected: this.betAmount * 2
+          },
+          timestamp: new Date().toISOString()
+        });
+
         // Announce winner first
         humanPlayers.forEach(id => {
           io.to(id).emit('gameEnd', {
@@ -1665,6 +1855,18 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         );
         console.log('Winner instant payment sent:', winnerPayment);
 
+        // Log winner payment
+        transactionLogger.info({
+          event: 'payout_sent',
+          gameId: this.id,
+          playerId: playerId,
+          recipient: winnerAddress,
+          amount: payout.winner,
+          currency: 'SATS',
+          paymentResponse: winnerPayment,
+          timestamp: new Date().toISOString()
+        });
+
         // Send platform fee (no extra winner fee)
         const platformFee = await sendInstantPayment(
           'slatesense@speed.app',
@@ -1674,6 +1876,17 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           `Sea Battle platform fee - Game ${this.id} - Fee: ${payout.platformFee} SATS`
         );
         console.log('Platform fee instant payment sent:', platformFee);
+
+        // Log platform fee payment
+        transactionLogger.info({
+          event: 'platform_fee_sent',
+          gameId: this.id,
+          recipient: 'slatesense@speed.app',
+          amount: payout.platformFee,
+          currency: 'SATS',
+          paymentResponse: platformFee,
+          timestamp: new Date().toISOString()
+        });
 
         // Confirm payment transaction to the client
         io.to(this.id).emit('transaction', {
@@ -1685,6 +1898,24 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         console.log(`Platform fee processed: ${payout.platformFee} SATS to slatesense@speed.app`);
       }
     } catch (error) {
+      logger.error('Payment error in endGame', {
+        gameId: this.id,
+        playerId: playerId,
+        error: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Log failed payout attempt
+      transactionLogger.error({
+        event: 'payout_failed',
+        gameId: this.id,
+        playerId: playerId,
+        error: error.message,
+        betAmount: this.betAmount,
+        timestamp: new Date().toISOString()
+      });
+      
       console.error('Payment error:', error.message);
       console.log(`Failed to process payment in game ${this.id} for player ${playerId}: ${error.message}`);
       io.to(this.id).emit('error', { message: `Payment processing failed: ${error.message}` });
@@ -1700,6 +1931,14 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     this.playerConnected[playerId] = false;
     console.log(`Player ${playerId} disconnected from game ${this.id}`);
     
+    // Log player disconnect
+    playerLogger.info({
+      event: 'player_disconnected',
+      playerId: playerId,
+      gameId: this.id,
+      timestamp: new Date().toISOString()
+    });
+    
     // Start disconnect timer
     this.disconnectTimers[playerId] = setTimeout(() => {
       if (!this.playerConnected[playerId] && !this.winner) {
@@ -1707,6 +1946,16 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         
         if (opponentId) {
           console.log(`Player ${playerId} failed to reconnect, awarding win to ${opponentId}`);
+          
+          // Log disconnect win
+          gameLogger.info({
+            event: 'disconnect_win',
+            gameId: this.id,
+            disconnectedPlayer: playerId,
+            winner: opponentId,
+            timestamp: new Date().toISOString()
+          });
+          
           this.endGame(opponentId);
         } else {
           // Only bots left, clean up
@@ -1724,6 +1973,14 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     
     this.playerConnected[playerId] = true;
     console.log(`Player ${playerId} reconnected to game ${this.id}`);
+    
+    // Log player reconnect
+    playerLogger.info({
+      event: 'player_reconnected',
+      playerId: playerId,
+      gameId: this.id,
+      timestamp: new Date().toISOString()
+    });
   }
   
   cleanup() {
@@ -1785,6 +2042,15 @@ io.on('connection', (socket) => {
       
       const formattedAddress = lightningAddress.includes('@') ? lightningAddress : `${lightningAddress}@speed.app`;
       console.log(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${formattedAddress}`);
+
+      // Log player join
+      playerLogger.info({
+        event: 'player_joined',
+        playerId: socket.id,
+        lightningAddress: formattedAddress,
+        betAmount: betAmount,
+        timestamp: new Date().toISOString()
+      });
 
       players[socket.id] = { lightningAddress: formattedAddress, paid: false, betAmount };
 
