@@ -9,6 +9,11 @@
             "date": 1752510164094,
             "name": "logs\\players-2025-07-14.log",
             "hash": "087e6d6c559f10717645f1d35c6798d0263405427d92e52496d93bcaea28eaeb"
+        },
+        {
+            "date": 1752555651755,
+            "name": "logs\\players-2025-07-15.log",
+            "hash": "abeb407affc55ecc0b309bc41184c824dde88f511d1a54a7f3665b113f00752b"
         }
     ],
     "hashType": "sha256"
