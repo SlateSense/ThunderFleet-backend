@@ -1,36 +1,16 @@
 require('dotenv').config();
-console.log('Debug-2025-06-16-2: dotenv loaded');
 
 const express = require('express');
-console.log('Debug-2025-06-16-2: express loaded');
-
 const socketio = require('socket.io');
-console.log('Debug-2025-06-16-2: socket.io loaded');
-
 const http = require('http');
-console.log('Debug-2025-06-16-2: http loaded');
-
 const cors = require('cors');
-console.log('Debug-2025-06-16-2: cors loaded');
-
 const axios = require('axios');
-console.log('Debug-2025-06-16-2: axios loaded');
-
 const { bech32 } = require('bech32');
-console.log('Debug-2025-06-16-2: bech32 loaded');
-
 const cron = require('node-cron');
-console.log('Debug-2025-06-16-2: node-cron loaded');
-
 const crypto = require('crypto');
-console.log('Debug-2025-06-16-2: crypto loaded');
-
 const rateLimit = require('express-rate-limit');
-console.log('Debug-2025-06-16-2: express-rate-limit loaded');
-
 const winston = require('winston');
 require('winston-daily-rotate-file');
-console.log('Debug-2025-06-16-2: winston logging loaded');
 
 // Configure Winston logging
 const logger = winston.createLogger({
@@ -135,20 +115,84 @@ const playerLogger = winston.createLogger({
   ]
 });
 
-console.log('Debug-2025-06-16-2: Winston logging configured');
+// Enhanced comprehensive player session logger
+const playerSessionLogger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.label({ label: 'PLAYER_SESSION' }),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.DailyRotateFile({
+      filename: 'logs/player-sessions-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      maxFiles: '60d',
+      maxSize: '20m',
+      archiveCompressed: true
+    })
+  ]
+});
+
+// Function to log comprehensive player session data
+function logPlayerSession(playerId, sessionData) {
+  const sessionEntry = {
+    playerId,
+    timestamp: new Date().toISOString(),
+    sessionData,
+    // Core tracking fields
+    gameId: sessionData.gameId || null,
+    lightningAddress: sessionData.lightningAddress || null,
+    betAmount: sessionData.betAmount || null,
+    paymentSent: sessionData.paymentSent || false,
+    paymentReceived: sessionData.paymentReceived || false,
+    gameResult: sessionData.gameResult || null, // 'won', 'lost', 'disconnected'
+    disconnectedDuringGame: sessionData.disconnectedDuringGame || false,
+    gameStartTime: sessionData.gameStartTime || null,
+    gameEndTime: sessionData.gameEndTime || null,
+    gameDuration: sessionData.gameDuration || null,
+    opponentType: sessionData.opponentType || null, // 'human', 'bot'
+    payoutAmount: sessionData.payoutAmount || 0,
+    payoutStatus: sessionData.payoutStatus || null // 'sent', 'failed', 'not_applicable'
+  };
+  
+  playerSessionLogger.info(sessionEntry);
+  return sessionEntry;
+}
+
+// Utility function to create comprehensive game summary
+function logGameSummary(gameId, players, winner, betAmount, gameStartTime, gameEndTime) {
+  const gameSummary = {
+    event: 'game_summary',
+    gameId,
+    betAmount,
+    gameStartTime,
+    gameEndTime,
+    gameDuration: gameEndTime && gameStartTime ? 
+      Math.floor((new Date(gameEndTime) - new Date(gameStartTime)) / 1000) : null,
+    winner,
+    players: Object.keys(players).map(playerId => ({
+      playerId,
+      lightningAddress: players[playerId].lightningAddress,
+      isBot: players[playerId].isBot,
+      isWinner: playerId === winner
+    })),
+    timestamp: new Date().toISOString()
+  };
+  
+  gameLogger.info(gameSummary);
+  return gameSummary;
+}
 
 const app = express();
-console.log('Debug-2025-06-16-2: express app created');
 
 app.set('trust proxy', true);
-console.log('Debug-2025-06-16-2: Trust proxy enabled');
 
 app.use(cors({
   origin: '*',
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
 }));
-console.log('Debug-2025-06-16-2: CORS middleware applied');
 
 app.use(express.json());
 
@@ -156,29 +200,26 @@ const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
 });
-console.log('Debug-2025-06-16-2: Rate limiter configured');
 
 app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
-console.log('Debug-2025-06-16-2: Root route added');
 
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
-console.log('Debug-2025-06-16-2: Health route added');
 
 const invoiceToSocket = {};
 
 app.post('/webhook', webhookLimiter, async (req, res) => {
-  console.log('Webhook headers:', req.headers);
+  logger.debug('Webhook received', { headers: req.headers });
   const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret';
   const event = req.body;
-  console.log('Received webhook:', event);
+  logger.info('Processing webhook event', { event: event.event_type, data: event.data });
 
   try {
     const eventType = event.event_type;
-    console.log('Processing event type:', eventType);
+    logger.debug('Processing event type', { eventType });
 
     switch (eventType) {
       case 'invoice.paid':
@@ -209,7 +250,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
 
         socket.emit('paymentVerified');
         players[socket.id].paid = true;
-        console.log(`Payment verified for player ${socket.id} via webhook: ${invoiceId}`);
+        logger.info('Payment verified for player', { playerId: socket.id, invoiceId });
 
         let game = Object.values(games).find(g => 
           Object.keys(g.players).length === 1 && g.betAmount === players[socket.id].betAmount,
@@ -232,6 +273,11 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         
         game.addPlayer(socket.id, players[socket.id].lightningAddress);
         socket.join(game.id);
+        
+        // Update player session with payment sent status
+        game.updatePlayerSession(socket.id, {
+          paymentSent: true
+        });
 
         socket.emit('matchmakingTimer', { message: 'Estimated wait time: 10-25 seconds' });
         delete invoiceToSocket[invoiceId];
@@ -258,7 +304,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
           });
           
           failedSocket.emit('error', { message: 'Payment failed. Please try again.' });
-          console.log(`Payment failed for player ${failedSocket.id}: ${failedInvoiceId}`);
+          logger.warn('Payment failed for player', { playerId: failedSocket.id, invoiceId: failedInvoiceId });
           delete players[failedSocket.id];
           delete invoiceToSocket[failedInvoiceId];
         } else {
@@ -678,6 +724,92 @@ class SeaBattleGame {
     this.disconnectTimers = {};
     this.playerConnected = {};
     this.partialPlacements = {}; // Store partial ship placements
+    
+    // Enhanced player session tracking
+    this.playerSessions = {};
+    this.gameStartTime = null;
+    this.gameEndTime = null;
+  }
+  
+  // Initialize player session tracking
+  initializePlayerSession(playerId, lightningAddress, isBot = false) {
+    this.playerSessions[playerId] = {
+      playerId,
+      gameId: this.id,
+      lightningAddress,
+      betAmount: this.betAmount,
+      isBot,
+      joinTime: new Date().toISOString(),
+      paymentSent: false,
+      paymentReceived: false,
+      gameResult: null,
+      disconnectedDuringGame: false,
+      disconnectCount: 0,
+      disconnectTimes: [],
+      reconnectTimes: [],
+      gameStartTime: null,
+      gameEndTime: null,
+      gameDuration: null,
+      opponentType: null,
+      payoutAmount: 0,
+      payoutStatus: null,
+      shotsFired: 0,
+      shotsHit: 0,
+      shipsDestroyed: 0,
+      lastActivity: new Date().toISOString()
+    };
+    
+    // Log initial session creation
+    logPlayerSession(playerId, {
+      event: 'session_created',
+      ...this.playerSessions[playerId]
+    });
+  }
+  
+  // Update player session data
+  updatePlayerSession(playerId, updates) {
+    if (this.playerSessions[playerId]) {
+      this.playerSessions[playerId] = {
+        ...this.playerSessions[playerId],
+        ...updates,
+        lastActivity: new Date().toISOString()
+      };
+      
+      // Log session update
+      logPlayerSession(playerId, {
+        event: 'session_updated',
+        updates,
+        ...this.playerSessions[playerId]
+      });
+    }
+  }
+  
+  // Log comprehensive session data
+  logPlayerSessionComplete(playerId, event = 'session_complete') {
+    if (this.playerSessions[playerId]) {
+      const session = this.playerSessions[playerId];
+      const opponentId = Object.keys(this.players).find(id => id !== playerId);
+      const opponentType = opponentId ? (this.players[opponentId].isBot ? 'bot' : 'human') : 'unknown';
+      
+      // Calculate game duration if both start and end times are available
+      let gameDuration = null;
+      if (session.gameStartTime && session.gameEndTime) {
+        const startTime = new Date(session.gameStartTime);
+        const endTime = new Date(session.gameEndTime);
+        gameDuration = Math.floor((endTime - startTime) / 1000); // Duration in seconds
+      }
+      
+      const completeSessionData = {
+        ...session,
+        event,
+        opponentType,
+        gameDuration,
+        sessionEndTime: new Date().toISOString()
+      };
+      
+      logPlayerSession(playerId, completeSessionData);
+      return completeSessionData;
+    }
   }
 
   addPlayer(playerId, lightningAddress, isBot = false) {
@@ -696,6 +828,9 @@ class SeaBattleGame {
     this.partialPlacements[playerId] = [];
     const seed = playerId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) + Date.now();
     this.randomGenerators[playerId] = mulberry32(seed);
+
+    // Initialize player session tracking
+    this.initializePlayerSession(playerId, lightningAddress, isBot);
 
     if (isBot) {
       this.botState[playerId] = {
@@ -1193,6 +1328,16 @@ class SeaBattleGame {
   startGame() {
     const playerIds = Object.keys(this.players);
     this.turn = playerIds[Math.floor(Math.random() * playerIds.length)];
+    
+    // Track game start time
+    this.gameStartTime = new Date().toISOString();
+    
+    // Update player sessions with game start time
+    playerIds.forEach(id => {
+      this.updatePlayerSession(id, {
+        gameStartTime: this.gameStartTime
+      });
+    });
     
     playerIds.forEach(id => {
       if (!this.players[id].isBot) {
@@ -1696,6 +1841,12 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     
     opponent.board[position] = isHit ? 'hit' : 'miss';
 
+    // Update player session with shot statistics
+    this.updatePlayerSession(playerId, {
+      shotsFired: (this.playerSessions[playerId]?.shotsFired || 0) + 1,
+      shotsHit: (this.playerSessions[playerId]?.shotsHit || 0) + (isHit ? 1 : 0)
+    });
+
     if (isHit) {
       this.shipHits[playerId] = (this.shipHits[playerId] || 0) + 1;
       
@@ -1708,6 +1859,11 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           console.log(`${ship.name} has been sunk!`);
           this.humanSunkShips[playerId] = (this.humanSunkShips[playerId] || 0) + 1;
           sunkShip = ship;
+          
+          // Update session with ship destroyed
+          this.updatePlayerSession(playerId, {
+            shipsDestroyed: (this.playerSessions[playerId]?.shipsDestroyed || 0) + 1
+          });
         }
       }
     }
@@ -1780,6 +1936,9 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     if (this.winner) return; // Prevent endGame from running multiple times
     this.winner = playerId;
 
+    // Track game end time
+    this.gameEndTime = new Date().toISOString();
+
     try {
       const winnerPlayer = this.players[playerId];
       if (!winnerPlayer) {
@@ -1804,6 +1963,19 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       }
 
       const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
+      
+      // Update all player sessions with game end time and results
+      Object.keys(this.players).forEach(id => {
+        const isWinner = id === playerId;
+        const isBot = this.players[id].isBot;
+        
+        this.updatePlayerSession(id, {
+          gameEndTime: this.gameEndTime,
+          gameResult: isWinner ? 'won' : 'lost',
+          payoutAmount: isWinner && !isBot ? payout.winner : 0,
+          payoutStatus: isWinner && !isBot ? 'pending' : 'not_applicable'
+        });
+      });
 
       if (winnerPlayer.isBot) {
         // Log bot victory
@@ -1877,6 +2049,12 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           paymentResponse: winnerPayment,
           timestamp: new Date().toISOString()
         });
+        
+        // Update winner's session with successful payout
+        this.updatePlayerSession(playerId, {
+          paymentReceived: true,
+          payoutStatus: 'sent'
+        });
 
         // Send platform fee (no extra winner fee)
         const platformFee = await sendInstantPayment(
@@ -1917,7 +2095,13 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         timestamp: new Date().toISOString()
       });
       
-      // Log failed payout attempt
+      // Update player session with failed payout
+      this.updatePlayerSession(playerId, {
+        paymentReceived: false,
+        payoutStatus: 'failed'
+      });
+      
+      // Log payout failure
       transactionLogger.error({
         event: 'payout_failed',
         gameId: this.id,
@@ -1931,6 +2115,14 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       console.log(`Failed to process payment in game ${this.id} for player ${playerId}: ${error.message}`);
       io.to(this.id).emit('error', { message: `Payment processing failed: ${error.message}` });
     } finally {
+      // Log comprehensive game summary
+      logGameSummary(this.id, this.players, playerId, this.betAmount, this.gameStartTime, this.gameEndTime);
+      
+      // Log final session data for all players
+      Object.keys(this.players).forEach(id => {
+        this.logPlayerSessionComplete(id, 'game_ended');
+      });
+      
       // Cleanup is now safe to call
       this.cleanup();
     }
@@ -1941,6 +2133,13 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     
     this.playerConnected[playerId] = false;
     console.log(`Player ${playerId} disconnected from game ${this.id}`);
+    
+    // Update player session with disconnect info
+    this.updatePlayerSession(playerId, {
+      disconnectedDuringGame: true,
+      disconnectCount: (this.playerSessions[playerId]?.disconnectCount || 0) + 1,
+      disconnectTimes: [...(this.playerSessions[playerId]?.disconnectTimes || []), new Date().toISOString()]
+    });
     
     // Log player disconnect
     playerLogger.info({
@@ -1957,6 +2156,11 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         
         if (opponentId) {
           console.log(`Player ${playerId} failed to reconnect, awarding win to ${opponentId}`);
+          
+          // Update disconnected player's session
+          this.updatePlayerSession(playerId, {
+            gameResult: 'disconnected'
+          });
           
           // Log disconnect win
           gameLogger.info({
@@ -1984,6 +2188,11 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     
     this.playerConnected[playerId] = true;
     console.log(`Player ${playerId} reconnected to game ${this.id}`);
+    
+    // Update player session with reconnect info
+    this.updatePlayerSession(playerId, {
+      reconnectTimes: [...(this.playerSessions[playerId]?.reconnectTimes || []), new Date().toISOString()]
+    });
     
     // Log player reconnect
     playerLogger.info({
