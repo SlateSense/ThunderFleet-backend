@@ -135,14 +135,14 @@ const playerSessionLogger = winston.createLogger({
 });
 
 // Function to log comprehensive player session data
-function logPlayerSession(playerId, sessionData) {
+function logPlayerSession(lightningAddress, sessionData) {
   const sessionEntry = {
-    playerId,
+    lightningAddress,
     timestamp: new Date().toISOString(),
     sessionData,
     // Core tracking fields
     gameId: sessionData.gameId || null,
-    lightningAddress: sessionData.lightningAddress || null,
+    playerId: sessionData.playerId || null,
     betAmount: sessionData.betAmount || null,
     paymentSent: sessionData.paymentSent || false,
     paymentReceived: sessionData.paymentReceived || false,
@@ -156,6 +156,7 @@ function logPlayerSession(playerId, sessionData) {
     payoutStatus: sessionData.payoutStatus || null // 'sent', 'failed', 'not_applicable'
   };
   
+  console.log('Logging player session:', lightningAddress, sessionEntry);
   playerSessionLogger.info(sessionEntry);
   return sessionEntry;
 }
@@ -760,8 +761,9 @@ class SeaBattleGame {
     };
     
     // Log initial session creation
-    logPlayerSession(playerId, {
+    logPlayerSession(lightningAddress, {
       event: 'session_created',
+      playerId,
       ...this.playerSessions[playerId]
     });
   }
@@ -775,9 +777,11 @@ class SeaBattleGame {
         lastActivity: new Date().toISOString()
       };
       
-      // Log session update
-      logPlayerSession(playerId, {
+      // Log session update using Lightning address
+      const lightningAddress = this.players[playerId]?.lightningAddress || playerId;
+      logPlayerSession(lightningAddress, {
         event: 'session_updated',
+        playerId,
         updates,
         ...this.playerSessions[playerId]
       });
@@ -802,12 +806,15 @@ class SeaBattleGame {
       const completeSessionData = {
         ...session,
         event,
+        playerId,
         opponentType,
         gameDuration,
         sessionEndTime: new Date().toISOString()
       };
       
-      logPlayerSession(playerId, completeSessionData);
+      // Use Lightning address for logging
+      const lightningAddress = this.players[playerId]?.lightningAddress || playerId;
+      logPlayerSession(lightningAddress, completeSessionData);
       return completeSessionData;
     }
   }
