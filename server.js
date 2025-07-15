@@ -748,6 +748,7 @@ class SeaBattleGame {
     this.playerSessions = {};
     this.gameStartTime = null;
     this.gameEndTime = null;
+    this.patrolBoatRelocations = {}; // Track patrol boat relocation attempts
   }
   
   // Initialize player session tracking
@@ -1864,6 +1865,44 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     const isHit = opponent.board[position] === 'ship';
     let sunkShip = null;
     
+    // Check if this is a bot's patrol boat that got hit (for special relocation feature)
+    if (isHit && opponent.isBot) {
+      const ship = opponent.ships.find(s => s.positions.includes(position));
+      if (ship && ship.name === 'Patrol Boat' && ship.hits === 0) {
+        // First hit on bot's patrol boat - attempt to relocate it
+        const relocated = this.tryRelocateBotPatrolBoat(opponentId, ship, position);
+        if (relocated) {
+          console.log(`Bot's patrol boat secretly relocated after first hit at position ${position}`);
+          // Mark the hit position as miss instead since the boat moved
+          opponent.board[position] = 'miss';
+          
+          const fireResult = {
+            player: playerId,
+            position,
+            hit: false, // Show as miss to the human player
+            sunk: false,
+            shipName: null,
+          };
+          
+          io.to(opponentId).emit('fireResult', fireResult);
+          io.to(playerId).emit('fireResult', fireResult);
+          
+          // Update player session with shot statistics
+          this.updatePlayerSession(playerId, {
+            shotsFired: (this.playerSessions[playerId]?.shotsFired || 0) + 1,
+            shotsHit: (this.playerSessions[playerId]?.shotsHit || 0) // No hit counted
+          });
+          
+          // Turn passes to opponent since it was a "miss"
+          this.turn = opponentId;
+          io.to(this.id).emit('nextTurn', { turn: this.turn });
+          this.startFireTimer(this.turn);
+          
+          return true;
+        }
+      }
+    }
+    
     opponent.board[position] = isHit ? 'hit' : 'miss';
 
     // Update player session with shot statistics
@@ -1955,6 +1994,118 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       (this.totalShipCells - botHits <= 3) ||
       (this.totalShipCells - humanHits <= 3)
     );
+  }
+
+  // New method to attempt relocating bot's patrol boat when first hit
+  tryRelocateBotPatrolBoat(botId, patrolBoat, hitPosition) {
+    const bot = this.players[botId];
+    if (!bot || !bot.isBot) return false;
+    
+    // Initialize relocation tracking if not exists
+    if (!this.patrolBoatRelocations) {
+      this.patrolBoatRelocations = {};
+    }
+    if (!this.patrolBoatRelocations[botId]) {
+      this.patrolBoatRelocations[botId] = new Set();
+    }
+    
+    // Check if this position was already tried for relocation
+    if (this.patrolBoatRelocations[botId].has(hitPosition)) {
+      return false; // Already tried relocating from this position
+    }
+    
+    // Mark this position as tried
+    this.patrolBoatRelocations[botId].add(hitPosition);
+    
+    // Find available 2-space positions for the patrol boat
+    const availablePositions = this.findAvailablePatrolBoatPositions(botId, patrolBoat.positions);
+    
+    if (availablePositions.length === 0) {
+      console.log('No available positions for patrol boat relocation');
+      return false;
+    }
+    
+    // Choose a random available position
+    const seededRandom = this.randomGenerators[botId];
+    const newPosition = availablePositions[Math.floor(seededRandom() * availablePositions.length)];
+    
+    // Remove the old patrol boat from the board
+    patrolBoat.positions.forEach(pos => {
+      if (bot.board[pos] === 'ship') {
+        bot.board[pos] = 'water';
+      }
+    });
+    
+    // Place the patrol boat in the new position
+    patrolBoat.positions = newPosition.positions;
+    patrolBoat.horizontal = newPosition.horizontal;
+    patrolBoat.hits = 0; // Reset hits since it's relocating
+    
+    // Update the board with the new position
+    newPosition.positions.forEach(pos => {
+      bot.board[pos] = 'ship';
+    });
+    
+    console.log(`Bot ${botId}: Patrol boat relocated from [${patrolBoat.positions}] to [${newPosition.positions}] (horizontal: ${newPosition.horizontal})`);
+    
+    return true;
+  }
+  
+  // Find available positions for a 2-space patrol boat
+  findAvailablePatrolBoatPositions(botId, currentPositions) {
+    const bot = this.players[botId];
+    if (!bot) return [];
+    
+    const availablePositions = [];
+    const occupiedPositions = new Set();
+    
+    // Mark all current ship positions as occupied, except the current patrol boat
+    bot.ships.forEach(ship => {
+      if (ship.name !== 'Patrol Boat') {
+        ship.positions.forEach(pos => occupiedPositions.add(pos));
+      }
+    });
+    
+    // Also mark hit and miss positions as occupied
+    for (let i = 0; i < GRID_SIZE; i++) {
+      if (bot.board[i] === 'hit' || bot.board[i] === 'miss') {
+        occupiedPositions.add(i);
+      }
+    }
+    
+    // Try all possible horizontal positions
+    for (let row = 0; row < GRID_ROWS; row++) {
+      for (let col = 0; col < GRID_COLS - 1; col++) { // -1 because we need 2 spaces
+        const pos1 = row * GRID_COLS + col;
+        const pos2 = row * GRID_COLS + col + 1;
+        
+        if (!occupiedPositions.has(pos1) && !occupiedPositions.has(pos2) &&
+            !currentPositions.includes(pos1) && !currentPositions.includes(pos2)) {
+          availablePositions.push({
+            positions: [pos1, pos2],
+            horizontal: true
+          });
+        }
+      }
+    }
+    
+    // Try all possible vertical positions
+    for (let row = 0; row < GRID_ROWS - 1; row++) { // -1 because we need 2 spaces
+      for (let col = 0; col < GRID_COLS; col++) {
+        const pos1 = row * GRID_COLS + col;
+        const pos2 = (row + 1) * GRID_COLS + col;
+        
+        if (!occupiedPositions.has(pos1) && !occupiedPositions.has(pos2) &&
+            !currentPositions.includes(pos1) && !currentPositions.includes(pos2)) {
+          availablePositions.push({
+            positions: [pos1, pos2],
+            horizontal: false
+          });
+        }
+      }
+    }
+    
+    return availablePositions;
   }
 
   async endGame(playerId) {
