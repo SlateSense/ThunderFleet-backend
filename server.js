@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const winston = require('winston');
 require('winston-daily-rotate-file');
+const logForwarder = require('./log-forwarder');
 
 // Configure Winston logging
 const logger = winston.createLogger({
@@ -156,7 +157,17 @@ function logPlayerSession(lightningAddress, sessionData) {
     payoutStatus: sessionData.payoutStatus || null // 'sent', 'failed', 'not_applicable'
   };
   
-  console.log('Logging player session:', lightningAddress, sessionEntry);
+  console.log('🎮 PLAYER SESSION LOG:', lightningAddress);
+  console.log('📊 Game Result:', sessionEntry.gameResult);
+  console.log('💰 Bet Amount:', sessionEntry.betAmount, 'SATS');
+  console.log('🏆 Payout:', sessionEntry.payoutAmount, 'SATS');
+  console.log('⏱️ Game Duration:', sessionEntry.gameDuration, 'seconds');
+  console.log('🔗 Full Data:', JSON.stringify(sessionEntry, null, 2));
+  console.log('----------------------------------------');
+  
+  // Forward to local PC
+  logForwarder.logPlayerSession(lightningAddress, sessionEntry.sessionData);
+  
   playerSessionLogger.info(sessionEntry);
   return sessionEntry;
 }
@@ -239,7 +250,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         }
 
         // Log payment verification
-        transactionLogger.info({
+        const paymentData = {
           event: 'payment_verified',
           playerId: socket.id,
           invoiceId: invoiceId,
@@ -247,7 +258,12 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
           lightningAddress: players[socket.id]?.lightningAddress || 'unknown',
           timestamp: new Date().toISOString(),
           eventType: eventType
-        });
+        };
+        
+        transactionLogger.info(paymentData);
+        
+        // Forward payment log to PC
+        logForwarder.logPayment(socket.id, paymentData);
 
         socket.emit('paymentVerified');
         players[socket.id].paid = true;
@@ -276,6 +292,8 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         socket.join(game.id);
         
         // Update player session with payment sent status
+        console.log('💳 PAYMENT VERIFIED for:', players[socket.id].lightningAddress);
+        console.log('💰 Amount:', players[socket.id].betAmount, 'SATS');
         game.updatePlayerSession(socket.id, {
           paymentSent: true
         });
@@ -2043,7 +2061,8 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           'SATS',
           `Sea Battle payout - Game ${this.id} - Winner: ${payout.winner} SATS`
         );
-        console.log('Winner instant payment sent:', winnerPayment);
+        console.log('✅ Winner instant payment sent:', winnerPayment);
+        console.log('🎉 GAME COMPLETED - Winner:', winnerAddress, 'Amount:', payout.winner, 'SATS');
 
         // Log winner payment
         transactionLogger.info({
