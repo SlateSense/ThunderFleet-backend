@@ -223,7 +223,7 @@ app.get('/health', (req, res) => {
 
 const invoiceToSocket = {};
 
-app.post('/webhook', webhookLimiter, async (req, res) => {
+app.post('/webhook', express.json(), (req, res) => {
   logger.debug('Webhook received', { headers: req.headers });
   const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret';
   const event = req.body;
@@ -237,7 +237,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
       case 'invoice.paid':
       case 'payment.paid':
       case 'payment.confirmed':
-        const invoiceId = event.data?.object?.id;
+        const invoiceId = event.data?.object?.id || event.data?.id;
         if (!invoiceId) {
           logger.error('Webhook error: No invoiceId in webhook payload');
           return res.status(400).send('No invoiceId in webhook payload');
@@ -303,7 +303,7 @@ app.post('/webhook', webhookLimiter, async (req, res) => {
         break;
 
       case 'payment.failed':
-        const failedInvoiceId = event.data?.object?.id;
+        const failedInvoiceId = event.data?.object?.id || event.data?.id;
         if (!failedInvoiceId) {
           logger.error('Webhook error: No invoiceId in webhook payload for payment.failed');
           return res.status(400).send('No invoiceId in webhook payload');
@@ -355,7 +355,8 @@ const io = socketio(server, {
 });
 console.log('Debug-2025-06-16-2: Socket.IO initialized');
 
-const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com'; // Replace with actual API base URL
+const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
+const SPEED_API_BASE = 'https://api.tryspeed.com'; // For new Speed API
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
@@ -449,90 +450,39 @@ async function decodeAndFetchLnUrl(lnUrl) {
   }
 }
 
-async function createInvoice(amountSats, customerId, description) {
+async function createLightningInvoice(amountSats, customerId, orderId) {
   try {
-    console.log('Creating invoice with params:', { amountSats, customerId, description });
-    const createResponse = await axios.post(
-      `${SPEED_WALLET_API_BASE}/invoices`,
-      {
-        currency: 'SATS',
-        customer_id: customerId,
-        payment_methods: ['lightning'],
-        invoice_line_items: [
-          {
-            type: 'custom_line_item',
-            quantity: 1,
-            name: description,
-            unit_amount: amountSats,
-          }
-        ],
-      },
-      {
-        headers: {
-          Authorization: `Basic ${AUTH_HEADER}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000,
+    console.log('Creating Lightning invoice using Speed API:', { amountSats, customerId, orderId });
+    const payload = {
+      currency: 'USD',
+      amount: amountSats,
+      target_currency: 'SATS',
+      ttl: 600,
+      description: `Payment for order ${orderId}`,
+      metadata: {
+        Order_ID: orderId,
+        Customer_ID: customerId,
       }
-    );
-    const invoiceId = createResponse.data.id;
-    console.log('Created draft invoice:', invoiceId);
+    };
 
-    await axios.post(
-      `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}/finalize`,
-      {},
-      {
-        headers: {
-          Authorization: `Basic ${AUTH_HEADER}`,
-          'speed-version': '2022-04-15',
-        },
-        timeout: 5000,
+    const response = await axios.post(`${SPEED_API_BASE}/payments`, payload, {
+      headers: {
+        Authorization: `Basic ${AUTH_HEADER}`,
+        'Content-Type': 'application/json',
       }
-    );
-    console.log('Finalized invoice:', invoiceId);
+    });
 
-    const retrieveResponse = await axios.get(
-      `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}`,
-      {
-        headers: {
-          Authorization: `Basic ${AUTH_HEADER}`,
-          'speed-version': '2022-04-15',
-        },
-        timeout: 5000,
-      }
-    );
-    console.log('Retrieved invoice:', retrieveResponse.data.id);
-    const invoiceData = retrieveResponse.data;
-
-    console.log('Full invoice data:', JSON.stringify(invoiceData, null, 2));
-
-    let lightningInvoice = invoiceData.payment_request || 
-                          invoiceData.bolt11 || 
-                          invoiceData.lightning_invoice || 
-                          invoiceData.invoice || 
-                          invoiceData.lightning_payment_request || 
-                          invoiceData.lightning || 
-                          invoiceData.ln_invoice;
-
-    if (lightningInvoice && lightningInvoice.toLowerCase().startsWith('lnurl1')) {
-      console.log('Detected LN-URL in payment_request:', lightningInvoice);
-      lightningInvoice = await decodeAndFetchLnUrl(lightningInvoice);
-      console.log('Fetched BOLT11 invoice from LN-URL:', lightningInvoice);
-    }
-
-    if (!lightningInvoice) {
-      console.warn('No Lightning invoice found in response. Falling back to hosted_invoice_url.');
-      console.warn('Available fields:', Object.keys(invoiceData));
-      console.warn('Full invoice data for inspection:', invoiceData);
-      lightningInvoice = invoiceData.hosted_invoice_url;
-    } else {
-      console.log('Found Lightning invoice:', lightningInvoice);
-    }
-
+    console.log('Speed API response:', response.data);
+    
+    // Extract Lightning invoice from response
+    const lightningInvoice = response.data.lightning_invoice || response.data.invoice;
+    const hostedInvoiceUrl = response.data.hosted_invoice_url;
+    const invoiceId = response.data.id;
+    
     return {
-      hostedInvoiceUrl: invoiceData.hosted_invoice_url,
-      lightningInvoice: lightningInvoice,
-      invoiceId: invoiceData.id,
+      hostedInvoiceUrl,
+      lightningInvoice,
+      invoiceId,
     };
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
@@ -649,6 +599,11 @@ async function sendPayment(destination, amount, currency) {
 
 // New Speed Wallet instant send function using the instant-send API
 async function sendInstantPayment(withdrawRequest, amount, currency = 'USD', targetCurrency = 'SATS', note = '') {
+
+  /*
+  Placeholder for sending payments logic
+  Integrate actual sending logic here
+  */
   try {
     console.log('Sending instant payment via Speed Wallet instant-send API:', {
       withdrawRequest,
@@ -2460,10 +2415,10 @@ io.on('connection', (socket) => {
       players[socket.id] = { lightningAddress: formattedAddress, paid: false, betAmount };
 
       const customerId = 'cus_mbgcu49gfgNyffw9';
-      const invoiceData = await createInvoice(
+      const invoiceData = await createLightningInvoice(
         betAmount,
         customerId,
-        `Entry fee for Lightning Sea Battle - Player ${socket.id}`,
+        `order_${socket.id}_${Date.now()}`,
       );
 
       const lightningInvoice = invoiceData.lightningInvoice;
