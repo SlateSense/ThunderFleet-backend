@@ -450,14 +450,31 @@ async function decodeAndFetchLnUrl(lnUrl) {
   }
 }
 
+async function getBTCPrice() {
+  try {
+    const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd', {
+      timeout: 5000
+    });
+    return response.data.bitcoin.usd;
+  } catch (error) {
+    console.error('Failed to fetch BTC price:', error.message);
+    // Fallback to approximate rate if API fails
+    return 66667; // Fallback price (approximately $66,667 per BTC)
+  }
+}
+
 async function createLightningInvoice(amountSats, customerId, orderId) {
   try {
     console.log('Creating Lightning invoice using Speed API:', { amountSats, customerId, orderId });
     
-    // Convert sats to USD for the new API (approximate rate: 1 USD = 3000 sats)
-    // You can update this rate or fetch it from an API for real-time conversion
-    const SATS_PER_USD = 3000; // Approximate rate, adjust as needed
-    const amountUSD = amountSats / SATS_PER_USD;
+    // Get real-time BTC price and calculate sats per USD
+    const btcPriceUSD = await getBTCPrice();
+    const SATS_PER_BTC = 100000000; // 100 million sats per BTC
+    const satsPerUSD = SATS_PER_BTC / btcPriceUSD;
+    const amountUSD = amountSats / satsPerUSD;
+    
+    console.log(`BTC Price: $${btcPriceUSD}, Sats per USD: ${satsPerUSD.toFixed(2)}, Converting ${amountSats} sats to $${amountUSD.toFixed(4)}`);
+    
     
     // First try the new payments API
     const newPayload = {
