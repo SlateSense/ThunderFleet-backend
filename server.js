@@ -453,7 +453,9 @@ async function decodeAndFetchLnUrl(lnUrl) {
 async function createLightningInvoice(amountSats, customerId, orderId) {
   try {
     console.log('Creating Lightning invoice using Speed API:', { amountSats, customerId, orderId });
-    const payload = {
+    
+    // First try the new payments API
+    const newPayload = {
       currency: 'USD',
       amount: amountSats,
       target_currency: 'SATS',
@@ -465,24 +467,115 @@ async function createLightningInvoice(amountSats, customerId, orderId) {
       }
     };
 
-    const response = await axios.post(`${SPEED_API_BASE}/payments`, payload, {
-      headers: {
-        Authorization: `Basic ${AUTH_HEADER}`,
-        'Content-Type': 'application/json',
-      }
-    });
+    console.log('Trying new payments API with payload:', newPayload);
+    try {
+      const newResponse = await axios.post(`${SPEED_API_BASE}/payments`, newPayload, {
+        headers: {
+          Authorization: `Basic ${AUTH_HEADER}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      });
 
-    console.log('Speed API response:', response.data);
+      console.log('New API response:', newResponse.data);
+      
+      // Extract Lightning invoice from new API response
+      const lightningInvoice = newResponse.data.lightning_invoice || newResponse.data.invoice || newResponse.data.payment_request;
+      const hostedInvoiceUrl = newResponse.data.hosted_invoice_url;
+      const invoiceId = newResponse.data.id;
+      
+      if (lightningInvoice && invoiceId) {
+        return {
+          hostedInvoiceUrl,
+          lightningInvoice,
+          invoiceId,
+        };
+      }
+    } catch (newApiError) {
+      console.log('New API failed, falling back to old API:', newApiError.message);
+    }
     
-    // Extract Lightning invoice from response
-    const lightningInvoice = response.data.lightning_invoice || response.data.invoice;
-    const hostedInvoiceUrl = response.data.hosted_invoice_url;
-    const invoiceId = response.data.id;
+    // Fallback to old invoice API if new API fails
+    console.log('Falling back to old invoice API');
+    const oldPayload = {
+      currency: 'SATS',
+      customer_id: customerId,
+      payment_methods: ['lightning'],
+      invoice_line_items: [
+        {
+          type: 'custom_line_item',
+          quantity: 1,
+          name: `Payment for order ${orderId}`,
+          unit_amount: amountSats,
+        }
+      ],
+    };
     
+    const createResponse = await axios.post(
+      `${SPEED_WALLET_API_BASE}/invoices`,
+      oldPayload,
+      {
+        headers: {
+          Authorization: `Basic ${AUTH_HEADER}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      }
+    );
+    
+    const invoiceId = createResponse.data.id;
+    console.log('Created draft invoice:', invoiceId);
+
+    await axios.post(
+      `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}/finalize`,
+      {},
+      {
+        headers: {
+          Authorization: `Basic ${AUTH_HEADER}`,
+          'speed-version': '2022-04-15',
+        },
+        timeout: 5000,
+      }
+    );
+    console.log('Finalized invoice:', invoiceId);
+
+    const retrieveResponse = await axios.get(
+      `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}`,
+      {
+        headers: {
+          Authorization: `Basic ${AUTH_HEADER}`,
+          'speed-version': '2022-04-15',
+        },
+        timeout: 5000,
+      }
+    );
+    
+    const invoiceData = retrieveResponse.data;
+    console.log('Retrieved invoice data:', invoiceData);
+
+    let lightningInvoice = invoiceData.payment_request || 
+                          invoiceData.bolt11 || 
+                          invoiceData.lightning_invoice || 
+                          invoiceData.invoice || 
+                          invoiceData.lightning_payment_request || 
+                          invoiceData.lightning || 
+                          invoiceData.ln_invoice;
+
+    if (lightningInvoice && lightningInvoice.toLowerCase().startsWith('lnurl1')) {
+      console.log('Detected LN-URL in payment_request:', lightningInvoice);
+      lightningInvoice = await decodeAndFetchLnUrl(lightningInvoice);
+      console.log('Fetched BOLT11 invoice from LN-URL:', lightningInvoice);
+    }
+
+    if (!lightningInvoice) {
+      console.warn('No Lightning invoice found in response. Using hosted URL.');
+      lightningInvoice = invoiceData.hosted_invoice_url;
+    }
+
     return {
-      hostedInvoiceUrl,
-      lightningInvoice,
-      invoiceId,
+      hostedInvoiceUrl: invoiceData.hosted_invoice_url,
+      lightningInvoice: lightningInvoice,
+      invoiceId: invoiceData.id,
     };
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
