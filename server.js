@@ -480,7 +480,12 @@ async function createLightningInvoice(amountSats, customerId, orderId) {
       console.log('New API response:', newResponse.data);
       
       // Extract Lightning invoice from new API response
-      const lightningInvoice = newResponse.data.lightning_invoice || newResponse.data.invoice || newResponse.data.payment_request;
+      // Check nested payment_method_options.lightning.payment_request first
+      let lightningInvoice = newResponse.data.payment_method_options?.lightning?.payment_request ||
+                            newResponse.data.lightning_invoice || 
+                            newResponse.data.invoice || 
+                            newResponse.data.payment_request;
+      
       const hostedInvoiceUrl = newResponse.data.hosted_invoice_url;
       const invoiceId = newResponse.data.id;
       
