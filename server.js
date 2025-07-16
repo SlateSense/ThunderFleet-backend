@@ -2601,6 +2601,73 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 4000;
+
+// Add cron job to keep server alive by pinging itself every 10 minutes
+cron.schedule('*/10 * * * *', async () => {
+  try {
+    const serverUrl = process.env.SERVER_URL || `http://localhost:${PORT}/health`;
+    console.log(`🏓 Cron job: Pinging server at ${serverUrl}`);
+    
+    const response = await axios.get(serverUrl, { timeout: 30000 });
+    console.log(`✅ Cron job: Server ping successful - Status: ${response.status}`);
+    
+    // Log the ping to keep track of server health
+    logger.info({
+      event: 'server_ping',
+      url: serverUrl,
+      status: response.status,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Cron job: Server ping failed:', error.message);
+    logger.error({
+      event: 'server_ping_failed',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Alternative: If external URL is available, ping that instead
+if (process.env.EXTERNAL_SERVER_URL) {
+  cron.schedule('*/10 * * * *', async () => {
+    try {
+      const externalUrl = process.env.EXTERNAL_SERVER_URL;
+      console.log(`🌐 Cron job: Pinging external server at ${externalUrl}`);
+      
+      const response = await axios.get(externalUrl, { timeout: 30000 });
+      console.log(`✅ Cron job: External server ping successful - Status: ${response.status}`);
+      
+      logger.info({
+        event: 'external_server_ping',
+        url: externalUrl,
+        status: response.status,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('❌ Cron job: External server ping failed:', error.message);
+      logger.error({
+        event: 'external_server_ping_failed',
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+}
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
+  console.log(`🔄 Cron job scheduled: Server will ping itself every 10 minutes to stay alive`);
+  
+  // Perform initial health check after server starts
+  setTimeout(async () => {
+    try {
+      const serverUrl = process.env.SERVER_URL || `http://localhost:${PORT}/health`;
+      console.log(`🎆 Initial health check: Pinging ${serverUrl}`);
+      const response = await axios.get(serverUrl, { timeout: 10000 });
+      console.log(`✅ Initial health check successful - Status: ${response.status}`);
+    } catch (error) {
+      console.error('❌ Initial health check failed:', error.message);
+    }
+  }, 5000); // Wait 5 seconds after server starts
 });
