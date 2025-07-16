@@ -454,10 +454,15 @@ async function createLightningInvoice(amountSats, customerId, orderId) {
   try {
     console.log('Creating Lightning invoice using Speed API:', { amountSats, customerId, orderId });
     
+    // Convert sats to USD for the new API (approximate rate: 1 USD = 3000 sats)
+    // You can update this rate or fetch it from an API for real-time conversion
+    const SATS_PER_USD = 3000; // Approximate rate, adjust as needed
+    const amountUSD = amountSats / SATS_PER_USD;
+    
     // First try the new payments API
     const newPayload = {
       currency: 'USD',
-      amount: amountSats,
+      amount: amountUSD, // Now sending USD amount
       target_currency: 'SATS',
       ttl: 600,
       description: `Payment for order ${orderId}`,
