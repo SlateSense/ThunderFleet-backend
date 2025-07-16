@@ -967,14 +967,22 @@ class SeaBattleGame {
           }
         }, this.placementTime * 1000);
       } else if (this.players[playerId].isBot) {
-        // Bot takes time to "think" about placement
+        // Bot saves placement when 15-25 seconds remain randomly
+        const remainingTime = Math.floor(Math.random() * 11) + 15; // Random between 15-25 seconds
+        const saveTime = this.placementTime - remainingTime;
+        
+        console.log(`Bot ${playerId} will save placement in ${saveTime} seconds (${remainingTime} seconds remaining)`);
+        
         setTimeout(() => {
-          this.autoPlaceShips(playerId);
-          this.players[playerId].ready = true;
-          this.placementConfirmed[playerId] = true;
-          console.log(`Bot ${playerId} finished placing ships`);
-          this.checkStartGame();
-        }, BOT_PLACEMENT_DELAY * 1000);
+          if (!this.players[playerId].ready) {
+            console.log(`Bot ${playerId} saving placement with ${remainingTime} seconds remaining`);
+            this.autoPlaceShips(playerId);
+            this.players[playerId].ready = true;
+            this.placementConfirmed[playerId] = true;
+            console.log(`Bot ${playerId} finished placing ships`);
+            this.checkStartGame();
+          }
+        }, saveTime * 1000);
       }
     });
     
