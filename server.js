@@ -249,7 +249,7 @@ app.post('/webhook', express.json(), (req, res) => {
           return res.status(200).send('Webhook received but no socket found');
         }
 
-        // Log payment verification
+        // Log payment verification with webhook data
         const paymentData = {
           event: 'payment_verified',
           playerId: socket.id,
@@ -257,7 +257,8 @@ app.post('/webhook', express.json(), (req, res) => {
           amount: players[socket.id]?.betAmount || 'unknown',
           lightningAddress: players[socket.id]?.lightningAddress || 'unknown',
           timestamp: new Date().toISOString(),
-          eventType: eventType
+          eventType: eventType,
+          webhookData: event.data // Store full webhook data for reference
         };
         
         transactionLogger.info(paymentData);
@@ -475,134 +476,79 @@ async function createLightningInvoice(amountSats, customerId, orderId) {
     
     console.log(`BTC Price: $${btcPriceUSD}, Sats per USD: ${satsPerUSD.toFixed(2)}, Converting ${amountSats} sats to $${amountUSD.toFixed(4)}`);
     
-    
-    // First try the new payments API
-    const newPayload = {
+    // Using the new Speed Payments API format as specified
+    const paymentPayload = {
       currency: 'USD',
-      amount: amountUSD, // Now sending USD amount
+      amount: parseFloat(amountUSD.toFixed(2)), // Round to 2 decimal places for USD
       target_currency: 'SATS',
-      ttl: 600,
-      description: `Payment for order ${orderId}`,
+      ttl: 600, // 10 minutes validity
+      description: `Sea Battle Game - Bet ${amountSats} SATS`,
       metadata: {
         Order_ID: orderId,
         Customer_ID: customerId,
+        Bet_Amount_Sats: amountSats.toString(),
+        Game_Type: 'Sea Battle',
+        Timestamp: new Date().toISOString()
       }
     };
 
-    console.log('Trying new payments API with payload:', newPayload);
-    try {
-      const newResponse = await axios.post(`${SPEED_API_BASE}/payments`, newPayload, {
-        headers: {
-          Authorization: `Basic ${AUTH_HEADER}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000,
-      });
+    console.log('Creating payment with Speed API:', paymentPayload);
+    
+    const response = await axios.post(`${SPEED_API_BASE}/payments`, paymentPayload, {
+      headers: {
+        Authorization: `Basic ${AUTH_HEADER}`,
+        'Content-Type': 'application/json',
+        'speed-version': '2024-10-26' // Latest API version
+      },
+      timeout: 10000,
+    });
 
-      console.log('New API response:', newResponse.data);
-      
-      // Extract Lightning invoice from new API response
-      // Check nested payment_method_options.lightning.payment_request first
-      let lightningInvoice = newResponse.data.payment_method_options?.lightning?.payment_request ||
-                            newResponse.data.lightning_invoice || 
-                            newResponse.data.invoice || 
-                            newResponse.data.payment_request;
-      
-      const hostedInvoiceUrl = newResponse.data.hosted_invoice_url;
-      const invoiceId = newResponse.data.id;
-      
-      if (lightningInvoice && invoiceId) {
-        return {
-          hostedInvoiceUrl,
-          lightningInvoice,
-          invoiceId,
-        };
-      }
-    } catch (newApiError) {
-      console.log('New API failed, falling back to old API:', newApiError.message);
+    console.log('Speed API Payment Response:', response.data);
+    
+    // Extract Lightning invoice and other details from response
+    const lightningInvoice = response.data.payment_method_options?.lightning?.payment_request ||
+                           response.data.lightning_invoice || 
+                           response.data.payment_request;
+    
+    const hostedInvoiceUrl = response.data.hosted_invoice_url;
+    const invoiceId = response.data.id;
+    const btcAddress = response.data.payment_method_options?.bitcoin?.address;
+    
+    if (!lightningInvoice || !invoiceId) {
+      throw new Error('Failed to get Lightning invoice from Speed API response');
     }
     
-    // Fallback to old invoice API if new API fails
-    console.log('Falling back to old invoice API');
-    const oldPayload = {
-      currency: 'SATS',
-      customer_id: customerId,
-      payment_methods: ['lightning'],
-      invoice_line_items: [
-        {
-          type: 'custom_line_item',
-          quantity: 1,
-          name: `Payment for order ${orderId}`,
-          unit_amount: amountSats,
-        }
-      ],
+    // Store additional payment info for webhook processing
+    const paymentInfo = {
+      invoiceId,
+      amountSats,
+      amountUSD: parseFloat(amountUSD.toFixed(2)),
+      btcPriceUSD,
+      createdAt: new Date().toISOString()
     };
     
-    const createResponse = await axios.post(
-      `${SPEED_WALLET_API_BASE}/invoices`,
-      oldPayload,
-      {
-        headers: {
-          Authorization: `Basic ${AUTH_HEADER}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000,
-      }
-    );
+    console.log('Payment created successfully:', paymentInfo);
     
-    const invoiceId = createResponse.data.id;
-    console.log('Created draft invoice:', invoiceId);
-
-    await axios.post(
-      `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}/finalize`,
-      {},
-      {
-        headers: {
-          Authorization: `Basic ${AUTH_HEADER}`,
-          'speed-version': '2022-04-15',
-        },
-        timeout: 5000,
-      }
-    );
-    console.log('Finalized invoice:', invoiceId);
-
-    const retrieveResponse = await axios.get(
-      `${SPEED_WALLET_API_BASE}/invoices/${invoiceId}`,
-      {
-        headers: {
-          Authorization: `Basic ${AUTH_HEADER}`,
-          'speed-version': '2022-04-15',
-        },
-        timeout: 5000,
-      }
-    );
+    // Log the payment creation
+    transactionLogger.info({
+      event: 'payment_created',
+      invoiceId,
+      amountSats,
+      amountUSD: paymentInfo.amountUSD,
+      btcPriceUSD,
+      customerId,
+      orderId,
+      timestamp: new Date().toISOString()
+    });
     
-    const invoiceData = retrieveResponse.data;
-    console.log('Retrieved invoice data:', invoiceData);
-
-    let lightningInvoice = invoiceData.payment_request || 
-                          invoiceData.bolt11 || 
-                          invoiceData.lightning_invoice || 
-                          invoiceData.invoice || 
-                          invoiceData.lightning_payment_request || 
-                          invoiceData.lightning || 
-                          invoiceData.ln_invoice;
-
-    if (lightningInvoice && lightningInvoice.toLowerCase().startsWith('lnurl1')) {
-      console.log('Detected LN-URL in payment_request:', lightningInvoice);
-      lightningInvoice = await decodeAndFetchLnUrl(lightningInvoice);
-      console.log('Fetched BOLT11 invoice from LN-URL:', lightningInvoice);
-    }
-
-    if (!lightningInvoice) {
-      console.warn('No Lightning invoice found in response. Using hosted URL.');
-      lightningInvoice = invoiceData.hosted_invoice_url;
-    }
-
     return {
-      hostedInvoiceUrl: invoiceData.hosted_invoice_url,
-      lightningInvoice: lightningInvoice,
-      invoiceId: invoiceData.id,
+      hostedInvoiceUrl,
+      lightningInvoice,
+      invoiceId,
+      btcAddress,
+      amountUSD: paymentInfo.amountUSD,
+      amountSats: paymentInfo.amountSats,
+      btcPriceUSD: paymentInfo.btcPriceUSD
     };
   } catch (error) {
     const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
