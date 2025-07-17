@@ -1,2 +1,5 @@
 {"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T06:20:01.200Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T06:20:01.200Z"}
 {"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T06:30:00.328Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T06:30:00.328Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T06:40:00.624Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T06:40:00.624Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T06:50:00.957Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T06:50:00.957Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T07:00:00.746Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T07:00:00.746Z"}
