@@ -14,6 +14,11 @@
             "date": 1752555651751,
             "name": "logs\\games-2025-07-15.log",
             "hash": "8b8efe52f8edc7601115477a34aba5c479a5b96e7d5cc717c77b9296bc43eb96"
+        },
+        {
+            "date": 1752732666066,
+            "name": "logs\\games-2025-07-17.log",
+            "hash": "18745c14272b9053a0f0531fda3356cce9e4b3cf6c9622a9b95248eafbf906fa"
         }
     ],
     "hashType": "sha256"
