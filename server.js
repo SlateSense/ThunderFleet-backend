@@ -486,13 +486,13 @@ async function createLightningInvoice(amountSats, customerId, orderId) {
   try {
     console.log('Creating Lightning invoice using Speed API:', { amountSats, customerId, orderId });
     
-    // Get real-time USD amount for the SATS
+    // Get real-time USD amount for the SATS for logging purposes
     const amountUSD = await convertSatsToUSD(amountSats);
     
-    // Use the new payments API with Speed Wallet interface
+    // Use the new payments API with Speed Wallet interface - request payment directly in SATS
     const newPayload = {
-      currency: 'USD',
-      amount: amountUSD,
+      currency: 'SATS',
+      amount: amountSats,
       target_currency: 'SATS',
       ttl: 600, // 10 minutes for payment
       description: `Sea Battle Game - ${amountSats} SATS`,
