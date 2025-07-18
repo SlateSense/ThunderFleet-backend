@@ -1,1 +1,2 @@
 {"level":"error","message":{"error":"read ECONNRESET","event":"server_ping_failed","timestamp":"2025-07-17T07:30:08.422Z"},"timestamp":"2025-07-17T07:30:08.422Z"}
+{"level":"error","message":{"error":"getaddrinfo ENOTFOUND thunderfleet-backend.onrender.com","event":"server_ping_failed","timestamp":"2025-07-17T08:40:12.165Z"},"timestamp":"2025-07-17T08:40:12.165Z"}

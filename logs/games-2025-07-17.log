@@ -8,3 +8,19 @@
 {"level":"error","message":{"error":"read ECONNRESET","event":"server_ping_failed","timestamp":"2025-07-17T07:30:08.422Z"},"timestamp":"2025-07-17T07:30:08.422Z"}
 {"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T07:40:01.137Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T07:40:01.137Z"}
 {"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T07:50:02.329Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T07:50:02.329Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T08:00:02.370Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T08:00:02.370Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T08:10:01.584Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T08:10:01.584Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T08:20:01.794Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T08:20:01.794Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T08:30:01.082Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T08:30:01.082Z"}
+{"level":"error","message":{"error":"getaddrinfo ENOTFOUND thunderfleet-backend.onrender.com","event":"server_ping_failed","timestamp":"2025-07-17T08:40:12.165Z"},"timestamp":"2025-07-17T08:40:12.165Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T08:50:00.487Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T08:50:00.487Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T09:00:01.255Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T09:00:01.255Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T09:10:12.505Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T09:10:12.505Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T09:20:00.823Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T09:20:00.823Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T09:30:00.797Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T09:30:00.797Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T09:40:00.713Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T09:40:00.713Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T09:50:00.958Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T09:50:00.958Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T10:00:01.293Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T10:00:01.293Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T10:10:01.141Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T10:10:01.141Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T10:20:00.761Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T10:20:00.761Z"}
+{"level":"info","message":{"event":"server_ping","status":200,"timestamp":"2025-07-17T10:30:01.495Z","url":"https://thunderfleet-backend.onrender.com/health"},"timestamp":"2025-07-17T10:30:01.496Z"}
