@@ -2281,7 +2281,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
 
         // Confirm payment transaction to the client
         io.to(this.id).emit('transaction', {
-          message: `Payments processed: ${payout.winner} sats to winner, ${payout.platformFee} sats platform fee.`,
+          message: `${payout.winner} sats sent to winner.`,
         });
 
         console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
@@ -2630,58 +2630,50 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 4000;
 
-// Add cron job to keep server alive by pinging itself every 10 minutes
+// Optimized cron job to keep server alive - single job with fallback
 cron.schedule('*/10 * * * *', async () => {
-  try {
-    const serverUrl = process.env.SERVER_URL || `http://localhost:${PORT}/health`;
-    console.log(`🏓 Cron job: Pinging server at ${serverUrl}`);
-    
-    const response = await axios.get(serverUrl, { timeout: 30000 });
-    console.log(`✅ Cron job: Server ping successful - Status: ${response.status}`);
-    
-    // Log the ping to keep track of server health
-    logger.info({
-      event: 'server_ping',
-      url: serverUrl,
-      status: response.status,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('❌ Cron job: Server ping failed:', error.message);
-    logger.error({
-      event: 'server_ping_failed',
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
+  const urls = [];
+  
+  // Add external URL first if available (preferred)
+  if (process.env.EXTERNAL_SERVER_URL) {
+    urls.push({ url: process.env.EXTERNAL_SERVER_URL, type: 'external' });
   }
-});
-
-// Alternative: If external URL is available, ping that instead
-if (process.env.EXTERNAL_SERVER_URL) {
-  cron.schedule('*/10 * * * *', async () => {
+  
+  // Add local URL as fallback
+  urls.push({ url: process.env.SERVER_URL || `http://localhost:${PORT}/health`, type: 'local' });
+  
+  for (const { url, type } of urls) {
     try {
-      const externalUrl = process.env.EXTERNAL_SERVER_URL;
-      console.log(`🌐 Cron job: Pinging external server at ${externalUrl}`);
+      console.log(`🏓 Cron job: Pinging ${type} server at ${url}`);
       
-      const response = await axios.get(externalUrl, { timeout: 30000 });
-      console.log(`✅ Cron job: External server ping successful - Status: ${response.status}`);
+      const response = await axios.get(url, { timeout: 15000 }); // Reduced timeout
+      console.log(`✅ Cron job: ${type} server ping successful - Status: ${response.status}`);
       
+      // Log only successful pings to reduce log noise
       logger.info({
-        event: 'external_server_ping',
-        url: externalUrl,
+        event: `${type}_server_ping`,
+        url,
         status: response.status,
         timestamp: new Date().toISOString()
       });
+      
+      // If successful, break out of the loop (don't try other URLs)
+      break;
+      
     } catch (error) {
-      console.error('❌ Cron job: External server ping failed:', error.message);
-      logger.error({
-        event: 'external_server_ping_failed',
-        error: error.message,
-        timestamp: new Date().toISOString()
-      });
+      console.error(`❌ Cron job: ${type} server ping failed:`, error.message);
+      
+      // Only log errors for the last URL attempt to reduce log spam
+      if (urls.indexOf({ url, type }) === urls.length - 1) {
+        logger.error({
+          event: 'all_server_pings_failed',
+          lastError: error.message,
+          timestamp: new Date().toISOString()
+        });
+      }
     }
-  });
-}
+  }
+});
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
