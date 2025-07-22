@@ -2628,66 +2628,107 @@ io.on('connection', (socket) => {
   });
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    memory: process.memoryUsage(),
+    activeGames: Object.keys(games).length
+  });
+});
+
 const PORT = process.env.PORT || 4000;
 
-// Optimized cron job to keep server alive - single job with fallback
-cron.schedule('*/10 * * * *', async () => {
+// Multiple keep-alive mechanisms
+let lastPingTime = Date.now();
+let serverStartTime = Date.now();
+let consecutiveFailures = 0;
+const MAX_CONSECUTIVE_FAILURES = 3;
+
+// Primary keep-alive: Cron job (every 5 minutes)
+cron.schedule('*/5 * * * *', async () => {
+  await pingServer('cron');
+});
+
+// Secondary keep-alive: setInterval backup (every 7 minutes)
+setInterval(async () => {
+  // Only ping if more than 3 minutes passed since last successful ping
+  if (Date.now() - lastPingTime > 180000) {
+    await pingServer('interval');
+  }
+}, 420000);
+
+// Tertiary keep-alive: Express middleware to reset timer on any request
+app.use((req, res, next) => {
+  lastPingTime = Date.now();
+  consecutiveFailures = 0;
+  next();
+});
+
+async function pingServer(source) {
   const urls = [];
   
-  // Add external URL first if available (preferred)
   if (process.env.EXTERNAL_SERVER_URL) {
     urls.push({ url: process.env.EXTERNAL_SERVER_URL, type: 'external' });
   }
   
-  // Add local URL as fallback
+  // Always include local URL as fallback
   urls.push({ url: process.env.SERVER_URL || `http://localhost:${PORT}/health`, type: 'local' });
   
   for (const { url, type } of urls) {
     try {
-      console.log(`🏓 Cron job: Pinging ${type} server at ${url}`);
+      console.log(`🏓 ${source}: Pinging ${type} server at ${url}`);
       
-      const response = await axios.get(url, { timeout: 15000 }); // Reduced timeout
-      console.log(`✅ Cron job: ${type} server ping successful - Status: ${response.status}`);
-      
-      // Log only successful pings to reduce log noise
-      logger.info({
-        event: `${type}_server_ping`,
-        url,
-        status: response.status,
-        timestamp: new Date().toISOString()
+      const response = await axios.get(url, { 
+        timeout: 10000,
+        headers: { 'Cache-Control': 'no-cache' }
       });
       
-      // If successful, break out of the loop (don't try other URLs)
-      break;
-      
+      if (response.status === 200) {
+        lastPingTime = Date.now();
+        consecutiveFailures = 0;
+        
+        logger.info({
+          event: 'server_ping_success',
+          source,
+          type,
+          uptime: Math.floor((Date.now() - serverStartTime) / 1000),
+          timestamp: new Date().toISOString()
+        });
+        
+        return true;
+      }
     } catch (error) {
-      console.error(`❌ Cron job: ${type} server ping failed:`, error.message);
+      console.error(`❌ ${source}: ${type} server ping failed:`, error.message);
+      consecutiveFailures++;
       
-      // Only log errors for the last URL attempt to reduce log spam
-      if (urls.indexOf({ url, type }) === urls.length - 1) {
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         logger.error({
-          event: 'all_server_pings_failed',
-          lastError: error.message,
+          event: 'server_ping_critical_failure',
+          source,
+          consecutiveFailures,
+          error: error.message,
           timestamp: new Date().toISOString()
         });
       }
     }
   }
-});
+  return false;
+}
 
+// Server startup
 server.listen(PORT, '0.0.0.0', () => {
+  serverStartTime = Date.now();
   console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
-  console.log(`🔄 Cron job scheduled: Server will ping itself every 10 minutes to stay alive`);
+  console.log('🔄 Keep-alive system initialized:');
+  console.log(' - Primary: Cron job (every 5 minutes)');
+  console.log(' - Secondary: Interval backup (every 7 minutes)');
+  console.log(' - Tertiary: Request-based reset');
   
-  // Perform initial health check after server starts
+  // Initial health check
   setTimeout(async () => {
-    try {
-      const serverUrl = process.env.SERVER_URL || `http://localhost:${PORT}/health`;
-      console.log(`🎆 Initial health check: Pinging ${serverUrl}`);
-      const response = await axios.get(serverUrl, { timeout: 10000 });
-      console.log(`✅ Initial health check successful - Status: ${response.status}`);
-    } catch (error) {
-      console.error('❌ Initial health check failed:', error.message);
-    }
-  }, 5000); // Wait 5 seconds after server starts
+    await pingServer('startup');
+  }, 5000);
 });
