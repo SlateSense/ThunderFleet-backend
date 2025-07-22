@@ -21,9 +21,11 @@ module.exports = {
     node_args: '--max-old-space-size=1024',
     watch: false,
     ignore_watch: ['node_modules', 'logs'],
-    restart_delay: 1000,
-    max_restarts: 10,
-    min_uptime: '10s'
+    restart_delay: 3000,
+    max_restarts: 0,
+    min_uptime: '5000',
+    autorestart: true,
+    exp_backoff_restart_delay: 100
   }],
 
   deploy: {
