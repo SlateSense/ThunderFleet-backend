@@ -2628,20 +2628,129 @@ io.on('connection', (socket) => {
   });
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
+const rateLimit = require('express-rate-limit');
+const queue = require('express-queue');
+
+// Configure rate limiting
+const limiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // limit each IP to 60 requests per windowMs
+  message: 'Too many requests, please try again later.'
+});
+
+// Apply rate limiting to all routes
+app.use(limiter);
+
+// Add request queuing to handle high load
+app.use(queue({ activeLimit: 50, queuedLimit: -1 }));
+
+// Track server health state
+let serverHealth = {
+  status: 'ok',
+  lastRestartTime: null,
+  serviceErrors: 0,
+  lastError: null,
+  isRecovering: false,
+  unavailableCount: 0
+};
+
+const MAX_SERVICE_ERRORS = 5;
+const RECOVERY_TIMEOUT = 30000; // 30 seconds
+
+// Enhanced health check endpoint with load monitoring
+app.get('/health', async (req, res) => {
+  const load = process.cpuUsage();
+  const memory = process.memoryUsage();
+  const healthStatus = {
+    status: serverHealth.status,
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
-    memory: process.memoryUsage(),
-    activeGames: Object.keys(games).length
-  });
+    memory: {
+      usedHeapSize: Math.round(memory.heapUsed / 1024 / 1024) + 'MB',
+      totalHeapSize: Math.round(memory.heapTotal / 1024 / 1024) + 'MB',
+      rss: Math.round(memory.rss / 1024 / 1024) + 'MB'
+    },
+    load: {
+      cpu: load,
+      activeGames: Object.keys(games).length,
+      activeSockets: io.engine.clientsCount
+    },
+    errors: {
+      serviceErrors: serverHealth.serviceErrors,
+      unavailableCount: serverHealth.unavailableCount,
+      lastError: serverHealth.lastError,
+      isRecovering: serverHealth.isRecovering
+    }
+  };
+
+  // If we're in a degraded state, still return 200 but indicate issues
+  if (serverHealth.isRecovering) {
+    healthStatus.status = 'recovering';
+  } else if (serverHealth.unavailableCount > 0) {
+    healthStatus.status = 'degraded';
+  }
+
+  res.status(200).json(healthStatus);
 });
+
+// Add recovery mechanism
+async function handleServerRecovery() {
+  if (serverHealth.unavailableCount >= MAX_SERVICE_ERRORS && !serverHealth.isRecovering) {
+    console.log('🔄 Initiating server recovery due to multiple service unavailable errors');
+    serverHealth.isRecovering = true;
+    
+    // Log recovery attempt
+    logger.warn({
+      event: 'server_recovery_started',
+      serviceErrors: serverHealth.serviceErrors,
+      unavailableCount: serverHealth.unavailableCount,
+      timestamp: new Date().toISOString()
+    });
+
+    try {
+      // Clear any stuck games or connections
+      Object.keys(games).forEach(gameId => {
+        const game = games[gameId];
+        if (game) {
+          game.cleanup();
+        }
+      });
+
+      // Force close all socket connections
+      io.sockets.sockets.forEach(socket => {
+        socket.disconnect(true);
+      });
+
+      // Clear memory
+      global.gc && global.gc();
+      
+      // Reset health counters
+      serverHealth = {
+        status: 'ok',
+        lastRestartTime: new Date().toISOString(),
+        serviceErrors: 0,
+        unavailableCount: 0,
+        lastError: null,
+        isRecovering: false
+      };
+
+      logger.info({
+        event: 'server_recovery_completed',
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error({
+        event: 'server_recovery_failed',
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+}
 
 const PORT = process.env.PORT || 4000;
 
-// Multiple keep-alive mechanisms
+// Multiple keep-alive mechanisms with enhanced error handling
 let lastPingTime = Date.now();
 let serverStartTime = Date.now();
 let consecutiveFailures = 0;
@@ -2677,41 +2786,103 @@ async function pingServer(source) {
   // Always include local URL as fallback
   urls.push({ url: process.env.SERVER_URL || `http://localhost:${PORT}/health`, type: 'local' });
   
+  let retryCount = 0;
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 5000; // 5 seconds
+
   for (const { url, type } of urls) {
-    try {
-      console.log(`🏓 ${source}: Pinging ${type} server at ${url}`);
-      
-      const response = await axios.get(url, { 
-        timeout: 10000,
-        headers: { 'Cache-Control': 'no-cache' }
-      });
-      
-      if (response.status === 200) {
-        lastPingTime = Date.now();
-        consecutiveFailures = 0;
+    retryCount = 0;
+    while (retryCount < MAX_RETRIES) {
+      try {
+        console.log(`🏓 ${source}: Pinging ${type} server at ${url} (attempt ${retryCount + 1}/${MAX_RETRIES})`);
         
-        logger.info({
-          event: 'server_ping_success',
-          source,
-          type,
-          uptime: Math.floor((Date.now() - serverStartTime) / 1000),
-          timestamp: new Date().toISOString()
+        const response = await axios.get(url, { 
+          timeout: 30000, // Increased timeout to 30 seconds
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          },
+          maxRedirects: 5,
+          validateStatus: function (status) {
+            return status < 500; // Only treat 500+ errors as failures
+          }
         });
         
-        return true;
-      }
-    } catch (error) {
-      console.error(`❌ ${source}: ${type} server ping failed:`, error.message);
-      consecutiveFailures++;
-      
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        logger.error({
-          event: 'server_ping_critical_failure',
-          source,
-          consecutiveFailures,
-          error: error.message,
-          timestamp: new Date().toISOString()
+        if (response.status === 200) {
+          lastPingTime = Date.now();
+          consecutiveFailures = 0;
+          
+          logger.info({
+            event: 'server_ping_success',
+            source,
+            type,
+            uptime: Math.floor((Date.now() - serverStartTime) / 1000),
+            timestamp: new Date().toISOString()
+          });
+          
+          return true;
+        }
+      } catch (error) {
+        const isServiceUnavailable = error.response && error.response.status === 503;
+        console.error(`❌ ${source}: ${type} server ping failed:`, {
+          status: error.response?.status,
+          message: error.message,
+          attempt: retryCount + 1
         });
+
+        consecutiveFailures++;
+        
+        // Special handling for service unavailable errors
+        if (isServiceUnavailable) {
+          console.log('⚠️ Detected service unavailable error, waiting before retry...');
+          serverHealth.unavailableCount++;
+          serverHealth.serviceErrors++;
+          serverHealth.lastError = {
+            time: new Date().toISOString(),
+            message: error.message,
+            status: error.response?.status
+          };
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1))); // Exponential backoff
+          retryCount++;
+          continue;
+        }
+
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          logger.error({
+            event: 'server_ping_critical_failure',
+            source,
+            type,
+            status: error.response?.status,
+            consecutiveFailures,
+            error: error.message,
+            timestamp: new Date().toISOString()
+          });
+
+          // If we're getting persistent 503s, try to recover
+          if (is503 && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            console.log('🔄 Attempting server recovery due to persistent 503 errors');
+            // Force garbage collection if available
+            if (global.gc) {
+              global.gc();
+            }
+            // Clear any stuck games
+            Object.keys(games).forEach(gameId => {
+              try {
+                const game = games[gameId];
+                if (game) game.cleanup();
+              } catch (cleanupError) {
+                console.error('Error during cleanup:', cleanupError);
+              }
+            });
+          }
+        }
+
+        if (retryCount < MAX_RETRIES - 1) {
+          console.log(`Retrying in ${RETRY_DELAY}ms...`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        }
+        retryCount++;
       }
     }
   }
