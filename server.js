@@ -9,6 +9,8 @@ const { bech32 } = require('bech32');
 const cron = require('node-cron');
 const crypto = require('crypto');
 const winston = require('winston');
+const rateLimit = require('express-rate-limit');
+const queue = require('express-queue');
 require('winston-daily-rotate-file');
 const logForwarder = require('./log-forwarder');
 
@@ -2627,9 +2629,6 @@ io.on('connection', (socket) => {
     }
   });
 });
-
-const rateLimit = require('express-rate-limit');
-const queue = require('express-queue');
 
 // Configure rate limiting
 const limiter = rateLimit({
