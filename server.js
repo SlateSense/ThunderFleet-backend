@@ -2135,6 +2135,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
 
   async endGame(playerId) {
     if (this.winner) return; // Prevent endGame from running multiple times
+    
     this.winner = playerId;
 
     // Track game end time
@@ -2889,17 +2890,65 @@ async function pingServer(source) {
   return false;
 }
 
-// Server startup
-server.listen(PORT, '0.0.0.0', () => {
-  serverStartTime = Date.now();
-  console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
-  console.log('🔄 Keep-alive system initialized:');
-  console.log(' - Primary: Cron job (every 5 minutes)');
-  console.log(' - Secondary: Interval backup (every 7 minutes)');
-  console.log(' - Tertiary: Request-based reset');
-  
-  // Initial health check
-  setTimeout(async () => {
-    await pingServer('startup');
-  }, 5000);
+// Set up global error handlers
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  logger.error({
+    event: 'uncaught_exception',
+    error: error.message,
+    stack: error.stack,
+    timestamp: new Date().toISOString()
+  });
+  process.exit(1);
 });
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.error({
+    event: 'unhandled_rejection',
+    error: reason,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Handle server-specific errors
+server.on('error', (error) => {
+  console.error('❌ Server failed to start:', error);
+  logger.error({
+    event: 'server_startup_failed',
+    error: error.message,
+    stack: error.stack,
+    timestamp: new Date().toISOString()
+  });
+  process.exit(1);
+});
+
+// Start the server
+try {
+  server.listen(PORT, '0.0.0.0', () => {
+    serverStartTime = Date.now();
+    console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
+    console.log('🔄 Keep-alive system initialized:');
+    console.log(' - Primary: Cron job (every 5 minutes)');
+    console.log(' - Secondary: Interval backup (every 7 minutes)');
+    console.log(' - Tertiary: Request-based reset');
+    
+    // Initial health check
+    setTimeout(async () => {
+      try {
+        await pingServer('startup');
+      } catch (error) {
+        console.error('Initial health check failed:', error);
+      }
+    }, 5000);
+  });
+} catch (error) {
+  console.error('❌ Failed to start server:', error);
+  logger.error({
+    event: 'server_startup_failed',
+    error: error.message,
+    stack: error.stack,
+    timestamp: new Date().toISOString()
+  });
+  process.exit(1);
+}
