@@ -8,7 +8,6 @@ const axios = require('axios');
 const { bech32 } = require('bech32');
 const cron = require('node-cron');
 const crypto = require('crypto');
-const rateLimit = require('express-rate-limit');
 const winston = require('winston');
 require('winston-daily-rotate-file');
 const logForwarder = require('./log-forwarder');
