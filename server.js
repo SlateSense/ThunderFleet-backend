@@ -10,7 +10,6 @@ const cron = require('node-cron');
 const crypto = require('crypto');
 const winston = require('winston');
 const rateLimit = require('express-rate-limit');
-const queue = require('express-queue');
 require('winston-daily-rotate-file');
 const logForwarder = require('./log-forwarder');
 
