@@ -222,6 +222,63 @@ app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
 
+// API endpoint to get payout information for display in the app
+app.get('/api/payout-info', (req, res) => {
+  try {
+    const payoutInfo = getPayoutInfo();
+    res.status(200).json(payoutInfo);
+  } catch (error) {
+    console.error('Error getting payout info:', error);
+    res.status(500).json({ error: 'Failed to get payout information' });
+  }
+});
+
+// API endpoint to handle user session with acct_id
+app.post('/api/user-session', express.json(), (req, res) => {
+  try {
+    const { acct_id, lightning_address } = req.body;
+    
+    if (!acct_id) {
+      return res.status(400).json({ error: 'acct_id is required' });
+    }
+    
+    // Check if user already has a stored Lightning address
+    const existingAddress = getLightningAddressByAcctId(acct_id);
+    
+    if (existingAddress) {
+      // User already has a Lightning address stored
+      return res.status(200).json({
+        message: 'User session found',
+        acct_id,
+        lightning_address: existingAddress,
+        requires_lightning_address: false
+      });
+    }
+    
+    if (lightning_address) {
+      // Store the new Lightning address mapping
+      mapUserAcctId(acct_id, lightning_address);
+      return res.status(200).json({
+        message: 'Lightning address stored successfully',
+        acct_id,
+        lightning_address,
+        requires_lightning_address: false
+      });
+    }
+    
+    // User needs to provide Lightning address
+    return res.status(200).json({
+      message: 'Lightning address required',
+      acct_id,
+      requires_lightning_address: true
+    });
+    
+  } catch (error) {
+    console.error('Error handling user session:', error);
+    res.status(500).json({ error: 'Failed to handle user session' });
+  }
+});
+
 const invoiceToSocket = {};
 
 app.post('/webhook', express.json(), (req, res) => {
@@ -418,6 +475,42 @@ const SHIP_CONFIG = [
 
 const games = {};
 const players = {};
+
+// User session management to store acct_id mapping
+const userSessions = {}; // Maps acct_id to Lightning address
+const playerAcctIds = {}; // Maps playerId to acct_id
+
+// Function to store or retrieve acct_id for Lightning address
+function mapUserAcctId(acctId, lightningAddress) {
+  userSessions[acctId] = lightningAddress;
+  console.log(`Mapped acct_id ${acctId} to Lightning address: ${lightningAddress}`);
+}
+
+// Function to get Lightning address by acct_id
+function getLightningAddressByAcctId(acctId) {
+  return userSessions[acctId];
+}
+
+// Function to check if user has Lightning address already stored
+function hasStoredLightningAddress(acctId) {
+  return userSessions[acctId] ? true : false;
+}
+
+// Function to get payout information for display in the app
+function getPayoutInfo() {
+  return {
+    api: {
+      name: "Speed Wallet API",
+      endpoint: SPEED_WALLET_API_BASE,
+      method: "Lightning Network instant payments",
+      description: "Winners are paid instantly via Lightning Network using Speed Wallet's send API"
+    },
+    payouts: PAYOUTS,
+    fees: "Platform fees are automatically deducted from the total pot",
+    currency: "SATS (Bitcoin Satoshis)",
+    paymentMethod: "Lightning Address (@speed.app)"
+  };
+}
 
 async function decodeAndFetchLnUrl(lnUrl) {
   try {
