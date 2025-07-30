@@ -2544,7 +2544,7 @@ io.on('connection', (socket) => {
     socket.emit('error', { message: 'An error occurred. Please try again.' });
   });
   
-  socket.on('joinGame', async ({ lightningAddress, betAmount }) => {
+  socket.on('joinGame', async ({ lightningAddress, betAmount, acctId }) => {
     try {
       console.log('Join game request:', { lightningAddress, betAmount });
       const validBetAmounts = [300, 500, 1000, 5000, 10000];
@@ -2559,6 +2559,13 @@ io.on('connection', (socket) => {
       
       const formattedAddress = lightningAddress.includes('@') ? lightningAddress : `${lightningAddress}@speed.app`;
       console.log(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${formattedAddress}`);
+      
+      // Map acctId to Lightning address if provided
+      if (acctId) {
+        mapUserAcctId(acctId, formattedAddress);
+        playerAcctIds[socket.id] = acctId;
+        console.log(`Mapped player ${socket.id} to acct_id: ${acctId}`);
+      }
 
       // Log player join
       playerLogger.info({
