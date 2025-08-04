@@ -19,6 +19,21 @@
             "date": 1752732666054,
             "name": "logs\\transactions-2025-07-17.log",
             "hash": "3bdfd56597431eeea8bc239f1a891ed5129afa940662f4423b3b130ae1c6aaac"
+        },
+        {
+            "date": 1754109662327,
+            "name": "logs\\transactions-2025-08-02.log",
+            "hash": "4e03b34ad6905c4d8e7b61f1b27dfecabf2002137fd6bb29219b937bab6f15b6"
+        },
+        {
+            "date": 1754202529662,
+            "name": "logs\\transactions-2025-08-03.log",
+            "hash": "26adea1f5a2b58ebaa00cdad542f7577a0da8cf76bf1b2c6aa75b91e04e565a8"
+        },
+        {
+            "date": 1754317795884,
+            "name": "logs\\transactions-2025-08-04.log",
+            "hash": "5d02eb6aa60c8943b67c2cc5ef8679a7cc63e627b862eec4c0c2a9942e88787e"
         }
     ],
     "hashType": "sha256"
