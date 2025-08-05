@@ -2046,23 +2046,9 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     const botState = this.botState[playerId];
     const opponent = this.players[opponentId];
     const position = remainingShipCells[0];
-    opponent.board[position] = 'hit';
-    this.shipHits[playerId]++;
-    botState.triedPositions.add(position);
-
-    io.to(opponentId).emit('fireResult', {
-      player: playerId,
-      position,
-      hit: true,
-    });
-
-    if (this.shipHits[playerId] >= this.totalShipCells) {
-      this.endGame(playerId);
-      return;
-    }
-
-    setTimeout(() => this.botFireShot(playerId), Math.floor(Math.random() * 1000) + 1000);
-    io.to(this.id).emit('nextTurn', { turn: this.turn });
+    
+    // Use the same logic as botFireShotAtPosition to ensure proper ship sinking
+    this.botFireShotAtPosition(playerId, position);
   }
 
   initBotState(playerId) {
