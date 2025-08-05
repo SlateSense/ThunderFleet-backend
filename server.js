@@ -2185,6 +2185,16 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         }
       });
     }
+    
+    // After processing all hits, check if all opponent ships are sunk
+    const remainingShips = opponent.ships.filter(ship => !ship.sunk);
+    console.log(`Remaining ships for opponent ${opponentId}:`, remainingShips.length);
+    
+    if (remainingShips.length === 0) {
+      console.log(`All ships destroyed! Player ${playerId} wins!`);
+      this.endGame(playerId);
+      return true;
+    }
 
     if (!isHit) {
       this.turn = opponentId;
