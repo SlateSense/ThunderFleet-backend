@@ -279,119 +279,6 @@ app.post('/api/user-session', express.json(), (req, res) => {
   }
 });
 
-// API endpoint to get player history based on Lightning address
-app.get('/api/history/:lightningAddress', async (req, res) => {
-  try {
-    const { lightningAddress } = req.params;
-    if (!lightningAddress) {
-      return res.status(400).json({ error: 'Lightning address is required' });
-    }
-
-    const fs = require('fs');
-    const path = require('path');
-    const glob = require('glob');
-
-    // Get all player session log files
-    const logDir = path.join(__dirname, 'logs');
-    const receivedLogsDir = path.join(__dirname, 'received-logs');
-
-    let history = [];
-
-    try {
-      // Check received-logs directory for specific player files
-      const playerFiles = glob.sync(`player-*${lightningAddress.replace('@', '_at_')}*.json`, { cwd: receivedLogsDir });
-      playerFiles.forEach(file => {
-        try {
-          const filePath = path.join(receivedLogsDir, file);
-          const content = fs.readFileSync(filePath, 'utf8');
-          const lines = content.trim().split('\n');
-          lines.forEach(line => {
-            try {
-              const logEntry = JSON.parse(line);
-              if (logEntry.data && logEntry.data.sessionData && logEntry.data.sessionData.lightningAddress === lightningAddress && logEntry.data.sessionData.event === 'game_ended') {
-                const sessionData = logEntry.data.sessionData;
-                const historyEntry = {
-                  gameId: sessionData.gameId,
-                  outcome: sessionData.gameResult === 'won' ? 'win' : 'loss',
-                  bet: sessionData.betAmount || 0,
-                  amount: sessionData.payoutAmount || 0,
-                  timestamp: sessionData.gameEndTime || logEntry.timestamp,
-                  opponent: sessionData.opponentType || 'unknown',
-                  shotsFired: sessionData.shotsFired || 0,
-                  shotsHit: sessionData.shotsHit || 0,
-                  gameDuration: sessionData.gameDuration || 0
-                };
-                history.push(historyEntry);
-              }
-            } catch (parseError) {
-              // Skip invalid JSON lines
-            }
-          });
-        } catch (fileError) {
-          console.error('Error reading player file:', file, fileError.message);
-        }
-      });
-
-      // Also check main player session logs
-      const sessionLogFiles = glob.sync('player-sessions-*.log', { cwd: logDir });
-      sessionLogFiles.forEach(file => {
-        try {
-          const filePath = path.join(logDir, file);
-          const content = fs.readFileSync(filePath, 'utf8');
-          const lines = content.trim().split('\n');
-          lines.forEach(line => {
-            try {
-              const logEntry = JSON.parse(line);
-              if (logEntry.lightningAddress === lightningAddress && logEntry.sessionData && logEntry.sessionData.event === 'game_ended') {
-                const sessionData = logEntry.sessionData;
-                const historyEntry = {
-                  gameId: sessionData.gameId,
-                  outcome: sessionData.gameResult === 'won' ? 'win' : 'loss',
-                  bet: sessionData.betAmount || 0,
-                  amount: sessionData.payoutAmount || 0,
-                  timestamp: sessionData.gameEndTime || logEntry.timestamp,
-                  opponent: sessionData.opponentType || 'unknown',
-                  shotsFired: sessionData.shotsFired || 0,
-                  shotsHit: sessionData.shotsHit || 0,
-                  gameDuration: sessionData.gameDuration || 0
-                };
-                history.push(historyEntry);
-              }
-            } catch (parseError) {
-              // Skip invalid JSON lines
-            }
-          });
-        } catch (fileError) {
-          console.error('Error reading session log file:', file, fileError.message);
-        }
-      });
-
-    } catch (dirError) {
-      console.error('Error reading log directories:', dirError.message);
-    }
-
-    // Sort by timestamp (most recent first) and remove duplicates
-    history = history
-      .filter((entry, index, self) => 
-        index === self.findIndex(e => e.gameId === entry.gameId))
-      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-      .slice(0, 50); // Limit to last 50 games
-
-    console.log(`📊 History request for ${lightningAddress}: Found ${history.length} games`);
-
-    res.status(200).json({
-      lightningAddress,
-      history,
-      totalGames: history.length,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('Error fetching player history:', error);
-    res.status(500).json({ error: 'Failed to fetch player history' });
-  }
-});
-
 const invoiceToSocket = {};
 
 app.post('/webhook', express.json(), (req, res) => {
@@ -2046,9 +1933,23 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     const botState = this.botState[playerId];
     const opponent = this.players[opponentId];
     const position = remainingShipCells[0];
-    
-    // Use the same logic as botFireShotAtPosition to ensure proper ship sinking
-    this.botFireShotAtPosition(playerId, position);
+    opponent.board[position] = 'hit';
+    this.shipHits[playerId]++;
+    botState.triedPositions.add(position);
+
+    io.to(opponentId).emit('fireResult', {
+      player: playerId,
+      position,
+      hit: true,
+    });
+
+    if (this.shipHits[playerId] >= this.totalShipCells) {
+      this.endGame(playerId);
+      return;
+    }
+
+    setTimeout(() => this.botFireShot(playerId), Math.floor(Math.random() * 1000) + 1000);
+    io.to(this.id).emit('nextTurn', { turn: this.turn });
   }
 
   initBotState(playerId) {
@@ -2184,16 +2085,6 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           io.to(playerId).emit('fireResult', sinkUpdate);
         }
       });
-    }
-    
-    // After processing all hits, check if all opponent ships are sunk
-    const remainingShips = opponent.ships.filter(ship => !ship.sunk);
-    console.log(`Remaining ships for opponent ${opponentId}:`, remainingShips.length);
-    
-    if (remainingShips.length === 0) {
-      console.log(`All ships destroyed! Player ${playerId} wins!`);
-      this.endGame(playerId);
-      return true;
     }
 
     if (!isHit) {
