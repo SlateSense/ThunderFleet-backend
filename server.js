@@ -279,6 +279,80 @@ app.post('/api/user-session', express.json(), (req, res) => {
   }
 });
 
+// API endpoint to get player history and stats
+app.get('/api/history/:lightning_address', async (req, res) => {
+  try {
+    const { lightning_address } = req.params;
+    
+    if (!lightning_address) {
+      return res.status(400).json({ error: 'Lightning address is required' });
+    }
+    
+    // Get player history from logs (this would be enhanced with a proper database)
+    const playerHistory = await getPlayerHistory(lightning_address);
+    const playerStats = calculatePlayerStats(playerHistory);
+    
+    res.status(200).json({
+      lightning_address,
+      history: playerHistory,
+      stats: playerStats,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error fetching player history:', error);
+    res.status(500).json({ error: 'Failed to fetch player history' });
+  }
+});
+
+// API endpoint to get player stats summary
+app.get('/api/stats/:lightning_address', (req, res) => {
+  try {
+    const { lightning_address } = req.params;
+    
+    if (!lightning_address) {
+      return res.status(400).json({ error: 'Lightning address is required' });
+    }
+    
+    const playerHistory = getPlayerHistory(lightning_address);
+    const stats = calculatePlayerStats(playerHistory);
+    
+    res.status(200).json({
+      lightning_address,
+      stats,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error fetching player stats:', error);
+    res.status(500).json({ error: 'Failed to fetch player stats' });
+  }
+});
+
+// API endpoint to get Speed Wallet transaction history (proxy)
+app.get('/api/speed-transactions/:lightning_address', async (req, res) => {
+  try {
+    const { lightning_address } = req.params;
+    
+    if (!lightning_address) {
+      return res.status(400).json({ error: 'Lightning address is required' });
+    }
+    
+    // Call Speed API to get transaction history
+    const speedTransactions = await fetchSpeedWalletTransactions(lightning_address);
+    
+    res.status(200).json({
+      lightning_address,
+      transactions: speedTransactions,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error fetching Speed transactions:', error);
+    res.status(500).json({ error: 'Failed to fetch Speed wallet transactions' });
+  }
+});
+
 const invoiceToSocket = {};
 
 app.post('/webhook', express.json(), (req, res) => {
@@ -418,6 +492,239 @@ const SPEED_API_BASE = 'https://api.tryspeed.com'; // For new Speed API
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
+
+// Helper functions for player history and stats
+const fs = require('fs');
+const path = require('path');
+const readline = require('readline');
+
+function getPlayerHistory(lightningAddress) {
+  return new Promise(async (resolve) => {
+    try {
+      const playerGames = [];
+      const logsDir = path.join(__dirname, 'logs');
+      
+      // Check if logs directory exists
+      if (!fs.existsSync(logsDir)) {
+        console.log('Logs directory not found, returning empty history');
+        return resolve([]);
+      }
+      
+      // Get all player session log files
+      const logFiles = fs.readdirSync(logsDir)
+        .filter(file => file.startsWith('player-sessions-') && file.endsWith('.log'))
+        .sort((a, b) => b.localeCompare(a)); // Sort by date descending (newest first)
+      
+      // Process recent log files (last 30 days)
+      const filesToProcess = logFiles.slice(0, 30);
+      
+      for (const file of filesToProcess) {
+        const filePath = path.join(logsDir, file);
+        
+        try {
+          const fileStream = fs.createReadStream(filePath);
+          const rl = readline.createInterface({
+            input: fileStream,
+            crlfDelay: Infinity
+          });
+          
+          for await (const line of rl) {
+            try {
+              const logEntry = JSON.parse(line);
+              
+              // Check if this log entry is for our player and is a game completion
+              if (logEntry.lightningAddress === lightningAddress && 
+                  logEntry.sessionData && 
+                  logEntry.sessionData.event === 'game_ended' &&
+                  logEntry.sessionData.gameResult) {
+                
+                const session = logEntry.sessionData;
+                const gameData = {
+                  gameId: session.gameId,
+                  timestamp: session.gameEndTime || logEntry.timestamp,
+                  betAmount: session.betAmount || 0,
+                  result: session.gameResult, // 'won', 'lost', 'disconnected'
+                  winnings: session.payoutAmount || 0,
+                  opponent: session.opponentType || 'unknown', // 'bot', 'human'
+                  duration: formatGameDuration(session.gameDuration),
+                  shotsFired: session.shotsFired || 0,
+                  hits: session.shotsHit || 0,
+                  accuracy: session.shotsFired > 0 ? Math.round((session.shotsHit / session.shotsFired) * 100) : 0,
+                  shipsDestroyed: session.shipsDestroyed || 0
+                };
+                
+                playerGames.push(gameData);
+              }
+            } catch (parseError) {
+              // Skip malformed log lines
+              continue;
+            }
+          }
+        } catch (fileError) {
+          console.error(`Error reading log file ${file}:`, fileError.message);
+          continue;
+        }
+      }
+      
+      // Sort games by timestamp (newest first)
+      playerGames.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      
+      console.log(`Found ${playerGames.length} games for player ${lightningAddress}`);
+      resolve(playerGames);
+      
+    } catch (error) {
+      console.error('Error fetching player history:', error);
+      resolve([]);
+    }
+  });
+}
+
+function formatGameDuration(seconds) {
+  if (!seconds || seconds <= 0) return '0m 0s';
+  
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+function calculatePlayerStats(history) {
+  if (!history || history.length === 0) {
+    return {
+      totalGames: 0,
+      wins: 0,
+      losses: 0,
+      winRate: 0,
+      totalBet: 0,
+      totalWinnings: 0,
+      totalLost: 0,
+      netProfit: 0,
+      avgBet: 0,
+      biggestWin: 0,
+      longestStreak: 0,
+      accuracy: 0,
+      avgGameDuration: '0m 0s'
+    };
+  }
+  
+  const totalGames = history.length;
+  const wins = history.filter(game => game.result === 'won').length;
+  const losses = totalGames - wins;
+  const totalBet = history.reduce((sum, game) => sum + (game.betAmount || 0), 0);
+  const totalWinnings = history.filter(game => game.result === 'won')
+    .reduce((sum, game) => sum + (game.winnings || 0), 0);
+  const totalLost = history.filter(game => game.result === 'lost')
+    .reduce((sum, game) => sum + (game.betAmount || 0), 0);
+  const netProfit = totalWinnings - totalLost;
+  const winRate = totalGames > 0 ? parseFloat(((wins / totalGames) * 100).toFixed(1)) : 0;
+  const avgBet = totalGames > 0 ? Math.round(totalBet / totalGames) : 0;
+  const biggestWin = history.length > 0 ? Math.max(...history.map(g => g.winnings || 0)) : 0;
+  
+  // Calculate longest win streak
+  let longestStreak = 0;
+  let currentStreak = 0;
+  for (const game of history) {
+    if (game.result === 'won') {
+      currentStreak++;
+      longestStreak = Math.max(longestStreak, currentStreak);
+    } else {
+      currentStreak = 0;
+    }
+  }
+  
+  // Calculate average accuracy
+  const gamesWithAccuracy = history.filter(game => game.accuracy !== undefined);
+  const accuracy = gamesWithAccuracy.length > 0 
+    ? Math.round(gamesWithAccuracy.reduce((sum, game) => sum + game.accuracy, 0) / gamesWithAccuracy.length)
+    : 0;
+  
+  return {
+    totalGames,
+    wins,
+    losses,
+    winRate,
+    totalBet,
+    totalWinnings,
+    totalLost,
+    netProfit,
+    avgBet,
+    biggestWin,
+    longestStreak,
+    accuracy,
+    avgGameDuration: calculateAvgGameDuration(history)
+  };
+}
+
+function calculateAvgGameDuration(history) {
+  const gamesWithDuration = history.filter(game => game.duration);
+  if (gamesWithDuration.length === 0) return '0m 0s';
+  
+  // Convert duration strings to seconds for averaging
+  const totalSeconds = gamesWithDuration.reduce((sum, game) => {
+    const duration = game.duration;
+    if (typeof duration === 'string') {
+      // Parse duration like "3m 45s" or "5m 12s"
+      const matches = duration.match(/(\d+)m\s*(\d+)s/);
+      if (matches) {
+        return sum + (parseInt(matches[1]) * 60) + parseInt(matches[2]);
+      }
+    }
+    return sum;
+  }, 0);
+  
+  const avgSeconds = Math.round(totalSeconds / gamesWithDuration.length);
+  const minutes = Math.floor(avgSeconds / 60);
+  const seconds = avgSeconds % 60;
+  
+  return `${minutes}m ${seconds}s`;
+}
+
+async function fetchSpeedWalletTransactions(lightningAddress) {
+  try {
+    console.log('Fetching Speed Wallet transactions for:', lightningAddress);
+    
+    // This would be the actual API call to Speed Wallet
+    // For now, return mock data structure
+    const mockTransactions = [
+      {
+        id: 'txn_' + Date.now(),
+        timestamp: new Date().toISOString(),
+        type: 'payment_received',
+        amount: 800,
+        currency: 'SATS',
+        description: 'Sea Battle game payout',
+        status: 'completed'
+      },
+      {
+        id: 'txn_' + (Date.now() - 86400000),
+        timestamp: new Date(Date.now() - 86400000).toISOString(),
+        type: 'payment_sent',
+        amount: -500,
+        currency: 'SATS',
+        description: 'Sea Battle game bet',
+        status: 'completed'
+      }
+    ];
+    
+    // In a real implementation, this would be:
+    // const response = await axios.get(`${SPEED_API_BASE}/transactions`, {
+    //   headers: {
+    //     Authorization: `Basic ${AUTH_HEADER}`,
+    //     'Content-Type': 'application/json'
+    //   },
+    //   params: {
+    //     lightning_address: lightningAddress,
+    //     limit: 50
+    //   }
+    // });
+    // return response.data.transactions || [];
+    
+    return mockTransactions;
+  } catch (error) {
+    console.error('Error fetching Speed Wallet transactions:', error);
+    return [];
+  }
+}
 
 console.log('Starting server... Debug-2025-06-16-2');
 
