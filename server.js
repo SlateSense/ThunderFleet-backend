@@ -279,7 +279,7 @@ app.post('/api/user-session', express.json(), (req, res) => {
   }
 });
 
-// API endpoint to get player history and stats by Lightning address
+// API endpoint to get player history and stats
 app.get('/api/history/:lightning_address', async (req, res) => {
   try {
     const { lightning_address } = req.params;
@@ -301,44 +301,6 @@ app.get('/api/history/:lightning_address', async (req, res) => {
     
   } catch (error) {
     console.error('Error fetching player history:', error);
-    res.status(500).json({ error: 'Failed to fetch player history' });
-  }
-});
-
-// API endpoint to get player history by acctId
-app.get('/api/history/account/:acct_id', async (req, res) => {
-  try {
-    const { acct_id } = req.params;
-    
-    if (!acct_id) {
-      return res.status(400).json({ error: 'Account ID is required' });
-    }
-    
-    // Get the Lightning address associated with this acctId
-    const lightningAddress = getLightningAddressByAcctId(acct_id);
-    
-    if (!lightningAddress) {
-      return res.status(404).json({ 
-        error: 'No Lightning address found for this account',
-        acct_id,
-        message: 'Please play a game first to link your account'
-      });
-    }
-    
-    // Get player history using the Lightning address
-    const playerHistory = await getPlayerHistory(lightningAddress);
-    const playerStats = calculatePlayerStats(playerHistory);
-    
-    res.status(200).json({
-      acct_id,
-      lightning_address: lightningAddress,
-      history: playerHistory,
-      stats: playerStats,
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    console.error('Error fetching player history by acctId:', error);
     res.status(500).json({ error: 'Failed to fetch player history' });
   }
 });
@@ -388,63 +350,6 @@ app.get('/api/speed-transactions/:lightning_address', async (req, res) => {
   } catch (error) {
     console.error('Error fetching Speed transactions:', error);
     res.status(500).json({ error: 'Failed to fetch Speed wallet transactions' });
-  }
-});
-
-// API endpoint to get player history by account ID
-app.get('/api/history/account/:acctId', async (req, res) => {
-  try {
-    const { acctId } = req.params;
-    
-    if (!acctId) {
-      return res.status(400).json({ error: 'Account ID is required' });
-    }
-    
-    // Get Lightning address from acctId
-    const lightningAddress = getLightningAddressByAcctId(acctId);
-    
-    if (!lightningAddress) {
-      return res.status(404).json({ 
-        error: 'No Lightning address found for this account. Please connect your wallet first.',
-        history: [],
-        stats: null
-      });
-    }
-    
-    console.log(`Fetching history for acctId: ${acctId}, Lightning address: ${lightningAddress}`);
-    
-    // Fetch player history using Lightning address
-    const history = await getPlayerHistory(lightningAddress);
-    
-    // Calculate player stats
-    const stats = calculatePlayerStats(history);
-    
-    // Transform history data to match frontend expectations
-    const transformedHistory = history.map(game => ({
-      date: game.timestamp,
-      betAmount: game.betAmount,
-      result: game.result === 'won' ? 'Win' : game.result === 'lost' ? 'Loss' : 'Disconnected',
-      profitOrLoss: game.result === 'won' ? (game.winnings - game.betAmount) : -game.betAmount,
-      gameId: game.gameId,
-      opponent: game.opponent,
-      duration: game.duration,
-      accuracy: game.accuracy,
-      hits: game.hits,
-      shotsFired: game.shotsFired,
-      shipsDestroyed: game.shipsDestroyed
-    }));
-    
-    res.status(200).json({
-      acctId,
-      lightningAddress,
-      history: transformedHistory,
-      stats,
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    console.error('Error fetching player history by account ID:', error);
-    res.status(500).json({ error: 'Failed to fetch player history' });
   }
 });
 
