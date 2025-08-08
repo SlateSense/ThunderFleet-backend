@@ -353,6 +353,80 @@ app.get('/api/speed-transactions/:lightning_address', async (req, res) => {
   }
 });
 
+// API endpoint to get player history by account ID
+app.get('/api/history/account/:acctId', async (req, res) => {
+  try {
+    const { acctId } = req.params;
+    
+    if (!acctId) {
+      return res.status(400).json({ error: 'Account ID is required' });
+    }
+    
+    // Get Lightning address from acct_id mapping
+    const lightningAddress = getLightningAddressByAcctId(acctId);
+    
+    if (!lightningAddress) {
+      console.log(`No Lightning address found for acct_id: ${acctId}`);
+      return res.status(404).json({ 
+        error: 'No Lightning address associated with this account',
+        acct_id: acctId,
+        history: [],
+        stats: {
+          totalGames: 0,
+          wins: 0,
+          losses: 0,
+          winRate: 0,
+          totalProfit: 0
+        }
+      });
+    }
+    
+    console.log(`Fetching history for acct_id: ${acctId}, Lightning address: ${lightningAddress}`);
+    
+    // Get player history using the Lightning address
+    const playerHistory = await getPlayerHistory(lightningAddress);
+    const playerStats = calculatePlayerStats(playerHistory);
+    
+    // Transform history for frontend display
+    const transformedHistory = playerHistory.map(game => ({
+      gameId: game.gameId,
+      date: game.timestamp,
+      betAmount: game.betAmount,
+      result: game.result === 'won' ? 'Win' : game.result === 'lost' ? 'Loss' : 'Disconnect',
+      profitOrLoss: game.result === 'won' ? game.winnings - game.betAmount : -game.betAmount,
+      opponent: game.opponent,
+      duration: game.duration,
+      shotsFired: game.shotsFired,
+      hits: game.hits,
+      accuracy: game.accuracy,
+      shipsDestroyed: game.shipsDestroyed
+    }));
+    
+    res.status(200).json({
+      acct_id: acctId,
+      lightning_address: lightningAddress,
+      history: transformedHistory,
+      stats: {
+        totalGames: playerStats.totalGames,
+        wins: playerStats.wins,
+        losses: playerStats.losses,
+        winRate: playerStats.winRate,
+        totalProfit: playerStats.netProfit,
+        totalBet: playerStats.totalBet,
+        totalWinnings: playerStats.totalWinnings,
+        biggestWin: playerStats.biggestWin,
+        longestStreak: playerStats.longestStreak,
+        accuracy: playerStats.accuracy
+      },
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error fetching player history by account ID:', error);
+    res.status(500).json({ error: 'Failed to fetch player history' });
+  }
+});
+
 const invoiceToSocket = {};
 
 app.post('/webhook', express.json(), (req, res) => {
