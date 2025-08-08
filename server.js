@@ -2084,6 +2084,11 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     const opponent = this.players[opponentId];
     const botState = this.botState[playerId];
     
+    // Log bot's shot for debugging
+    const humanSunk = this.humanSunkShips[opponentId] || 0;
+    const botSunk = this.botSunkShips[playerId] || 0;
+    console.log(`Bot shooting at position ${position} | Bot sunk: ${botSunk}, Human sunk: ${humanSunk}, Phase: ${botState.aggressivePhase ? 'Aggressive' : botState.endgamePhase ? 'Endgame' : 'Normal'}`);
+    
     botState.triedPositions.add(position);
     
     const isHit = opponent.board[position] === 'ship';
@@ -2193,7 +2198,21 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       const opponentId = Object.keys(this.players).find(id => id !== playerId);
       const opponent = this.players[opponentId];
       const seededRandom = this.randomGenerators[playerId];
-      const thinkingTime = Math.floor(seededRandom() * 1000) + 1000;
+      
+      // Initialize bot performance tracking if not exists
+      if (!botState.performanceTracking) {
+        botState.performanceTracking = {
+          shotsToMiss: 0,
+          endgameMisses: 0,
+          lastPatrolBoatCheck: null
+        };
+      }
+      
+      // Adjust thinking time based on game phase
+      let thinkingTime = Math.floor(seededRandom() * 1000) + 1000;
+      if (botState.aggressivePhase) {
+        thinkingTime = Math.floor(seededRandom() * 800) + 600; // Faster when aggressive
+      }
 
       setTimeout(() => {
         const remainingShipCells = opponent.board
@@ -2238,7 +2257,17 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         }
 
         if (this.botCheatMode[playerId] && !botState.currentTarget) {
-          if (seededRandom() < 0.7) {
+          // Adjust cheat probability based on game phase
+          let cheatProbability = 0.7;
+          
+          if (botState.aggressivePhase) {
+            cheatProbability = 0.5; // Less cheating when aggressive
+          }
+          if (botState.endgamePhase) {
+            cheatProbability = 0.3; // Much less cheating in endgame
+          }
+          
+          if (seededRandom() < cheatProbability) {
             const availableShips = opponent.board
               .map((cell, idx) => cell === 'ship' && !botState.triedPositions.has(idx) ? idx : null)
               .filter(idx => idx !== null);
@@ -2287,10 +2316,59 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
 
           const botSunk = this.botSunkShips[playerId] || 0;
           const humanSunk = this.humanSunkShips[opponentId] || 0;
+          const humanHits = this.shipHits[opponentId] || 0;
 
-          if (this.shouldBotCheatToWin(playerId, opponentId) && availableShips.length > 0) {
+          // Check for endgame phase (both destroyed 4 ships)
+          if (botState.endgamePhase && botSunk >= 4 && humanSunk >= 4) {
+            // In endgame, bot should miss 1-3 times before finding the patrol boat
+            if (!botState.performanceTracking.shotsToMiss) {
+              // Randomly decide how many shots to miss (1-3)
+              botState.performanceTracking.shotsToMiss = Math.floor(seededRandom() * 3) + 1;
+              botState.performanceTracking.endgameMisses = 0;
+              console.log(`Bot entering endgame - will miss ${botState.performanceTracking.shotsToMiss} shots before hitting patrol boat`);
+            }
+            
+            if (botState.performanceTracking.endgameMisses < botState.performanceTracking.shotsToMiss) {
+              // Intentionally miss
+              const waterPositions = available.filter(pos => opponent.board[pos] === 'water');
+              if (waterPositions.length > 0) {
+                position = waterPositions[Math.floor(seededRandom() * waterPositions.length)];
+                botState.performanceTracking.endgameMisses++;
+                console.log(`Bot intentional miss ${botState.performanceTracking.endgameMisses}/${botState.performanceTracking.shotsToMiss}`);
+              } else {
+                // No water left, hit a ship
+                position = availableShips[Math.floor(seededRandom() * availableShips.length)];
+              }
+            } else {
+              // Time to find and hit the patrol boat
+              const patrolBoat = opponent.ships.find(s => s.name === 'Patrol Boat' && !s.sunk);
+              if (patrolBoat) {
+                const unhitPatrolPositions = patrolBoat.positions.filter(pos => 
+                  !botState.triedPositions.has(pos) && opponent.board[pos] === 'ship'
+                );
+                if (unhitPatrolPositions.length > 0) {
+                  position = unhitPatrolPositions[0];
+                  console.log('Bot targeting patrol boat after endgame misses');
+                }
+              }
+              if (!position && availableShips.length > 0) {
+                position = availableShips[Math.floor(seededRandom() * availableShips.length)];
+              }
+            }
+          } else if (botState.aggressivePhase && (humanSunk >= 3 || humanHits >= 8)) {
+            // Slightly aggressive phase - better accuracy
+            if (seededRandom() < 0.6 && availableShips.length > 0) {
+              // 60% chance to hit when aggressive
+              position = availableShips[Math.floor(seededRandom() * availableShips.length)];
+              console.log('Bot in aggressive phase - 60% hit chance');
+            } else {
+              position = available[Math.floor(seededRandom() * available.length)];
+            }
+          } else if (this.shouldBotCheatToWin(playerId, opponentId) && availableShips.length > 0) {
+            // Normal cheating behavior
             position = availableShips[Math.floor(seededRandom() * availableShips.length)];
           } else {
+            // Normal random shooting
             position = available[Math.floor(seededRandom() * available.length)];
           }
         }
@@ -2336,6 +2414,13 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       lastHitShip: null,
       lastHitPosition: null,
       targets: [],
+      aggressivePhase: false,
+      endgamePhase: false,
+      performanceTracking: {
+        shotsToMiss: 0,
+        endgameMisses: 0,
+        lastPatrolBoatCheck: null
+      }
     };
     return this.botState[playerId];
   }
@@ -2486,6 +2571,43 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     const humanSunk = this.humanSunkShips[opponentId] || 0;
     const botHits = this.shipHits[playerId] || 0;
     const humanHits = this.shipHits[opponentId] || 0;
+    const humanHitCells = humanHits;
+    
+    // Enhanced adaptive difficulty logic
+    // Phase 1: Normal play until player destroys 3 ships or hits 8 cells
+    // Phase 2: Slightly aggressive when player is doing well (destroyed 3 ships or hit 8+ cells)
+    // Phase 3: More aggressive when both have destroyed 4 ships (endgame)
+    
+    // Check if we're in the endgame (both destroyed 4 ships)
+    if (botSunk >= 4 && humanSunk >= 4) {
+      // Endgame phase - bot should make it interesting but ultimately let player have a chance
+      this.botState[playerId].endgamePhase = true;
+      // Bot will randomly miss 1-3 times before hitting the patrol boat
+      return false; // Don't cheat in endgame, use special endgame logic
+    }
+    
+    // Check if player has performed well (destroyed 3+ ships or hit 8+ cells)
+    if (humanSunk >= 3 || humanHitCells >= 8) {
+      this.botState[playerId].aggressivePhase = true;
+      // Bot becomes slightly more aggressive
+      // Increase hit chance to maintain 2-3 ships destroyed for bot
+      if (botSunk < 2) {
+        // Bot needs to catch up a bit
+        return true;
+      } else if (botSunk < 3 && humanSunk >= 4) {
+        // Player is far ahead, bot should catch up
+        return true;
+      }
+    }
+    
+    // Normal play - bot should maintain balance
+    // Aim to destroy 2-3 ships while player destroys 3-4
+    if (botSunk < 2 && humanSunk >= 2) {
+      // Bot is falling behind, help it a bit
+      return Math.random() < 0.5; // 50% chance to cheat
+    }
+    
+    // Default behavior from original
     return (
       humanSunk > botSunk ||
       (this.totalShipCells - botHits <= 3) ||
@@ -2503,16 +2625,28 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       this.patrolBoatRelocations = {};
     }
     if (!this.patrolBoatRelocations[botId]) {
-      this.patrolBoatRelocations[botId] = new Set();
+      this.patrolBoatRelocations[botId] = {
+        attempts: new Set(),
+        totalRelocations: 0,
+        maxRelocations: 3 // Limit relocations to make it fair but challenging
+      };
+    }
+    
+    const relocInfo = this.patrolBoatRelocations[botId];
+    
+    // Check if we've exceeded max relocations
+    if (relocInfo.totalRelocations >= relocInfo.maxRelocations) {
+      console.log(`Bot ${botId}: Max patrol boat relocations (${relocInfo.maxRelocations}) reached`);
+      return false;
     }
     
     // Check if this position was already tried for relocation
-    if (this.patrolBoatRelocations[botId].has(hitPosition)) {
+    if (relocInfo.attempts.has(hitPosition)) {
       return false; // Already tried relocating from this position
     }
     
     // Mark this position as tried
-    this.patrolBoatRelocations[botId].add(hitPosition);
+    relocInfo.attempts.add(hitPosition);
     
     // Find available 2-space positions for the patrol boat
     const availablePositions = this.findAvailablePatrolBoatPositions(botId, patrolBoat.positions);
@@ -2544,6 +2678,10 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     });
     
     console.log(`Bot ${botId}: Patrol boat relocated from [${patrolBoat.positions}] to [${newPosition.positions}] (horizontal: ${newPosition.horizontal})`);
+    
+    // Increment relocation counter
+    this.patrolBoatRelocations[botId].totalRelocations++;
+    console.log(`Bot ${botId}: Patrol boat relocations used: ${this.patrolBoatRelocations[botId].totalRelocations}/${this.patrolBoatRelocations[botId].maxRelocations}`);
     
     return true;
   }
