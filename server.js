@@ -394,7 +394,6 @@ app.get('/api/history/account/:acctId', async (req, res) => {
       betAmount: game.betAmount,
       result: game.result === 'won' ? 'Win' : game.result === 'lost' ? 'Loss' : 'Disconnect',
       profitOrLoss: game.result === 'won' ? game.winnings - game.betAmount : -game.betAmount,
-      opponent: game.opponent,
       duration: game.duration,
       shotsFired: game.shotsFired,
       hits: game.hits,
@@ -619,14 +618,12 @@ function getPlayerHistory(lightningAddress) {
                   betAmount: session.betAmount || 0,
                   result: session.gameResult, // 'won', 'lost', 'disconnected'
                   winnings: session.payoutAmount || 0,
-                  opponent: session.opponentType || 'unknown', // 'bot', 'human'
                   duration: formatGameDuration(session.gameDuration),
                   shotsFired: session.shotsFired || 0,
                   hits: session.shotsHit || 0,
                   accuracy: session.shotsFired > 0 ? Math.round((session.shotsHit / session.shotsFired) * 100) : 0,
                   shipsDestroyed: session.shipsDestroyed || 0
                 };
-                
                 playerGames.push(gameData);
               }
             } catch (parseError) {
