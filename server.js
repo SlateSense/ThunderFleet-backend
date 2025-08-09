@@ -1463,13 +1463,51 @@ class SeaBattleGame {
 
   startMatchmaking() {
     const humanPlayers = Object.keys(this.players).filter(id => !this.players[id].isBot);
+    const delay = BOT_JOIN_DELAYS[Math.floor(Math.random() * BOT_JOIN_DELAYS.length)];
+    const estimatedWaitSeconds = Math.ceil(delay / 1000);
+    
+    // Send initial waiting message with estimated time
     humanPlayers.forEach(playerId => {
-      io.to(playerId).emit('waitingForOpponent', { message: 'Waiting for opponent...' });
+      io.to(playerId).emit('waitingForOpponent', { 
+        message: `Waiting for opponent... (Est. ${estimatedWaitSeconds}s)`,
+        countdown: false,
+        estimatedWait: estimatedWaitSeconds
+      });
     });
 
-    const delay = BOT_JOIN_DELAYS[Math.floor(Math.random() * BOT_JOIN_DELAYS.length)];
+    // Send periodic updates during matchmaking
+    let elapsed = 0;
+    this.matchmakingUpdateInterval = setInterval(() => {
+      elapsed += 1;
+      const remaining = Math.max(0, estimatedWaitSeconds - elapsed);
+      
+      humanPlayers.forEach(playerId => {
+        if (this.players[playerId] && !this.players[playerId].isBot) {
+          io.to(playerId).emit('matchmakingTimer', { 
+            message: remaining > 0 
+              ? `Searching for opponent... (${remaining}s)` 
+              : 'Still searching for opponent...',
+            timeRemaining: remaining,
+            estimatedWait: estimatedWaitSeconds
+          });
+        }
+      });
+      
+      // Clear interval when bot joins or game starts
+      if (Object.keys(this.players).length >= 2) {
+        clearInterval(this.matchmakingUpdateInterval);
+        this.matchmakingUpdateInterval = null;
+      }
+    }, 1000);
+
     this.matchmakingTimerInterval = setTimeout(() => {
       if (Object.keys(this.players).length === 1) {
+        // Clear the update interval before adding bot
+        if (this.matchmakingUpdateInterval) {
+          clearInterval(this.matchmakingUpdateInterval);
+          this.matchmakingUpdateInterval = null;
+        }
+        
         const botId = `bot_${Date.now()}`;
         this.addPlayer(botId, 'bot@tryspeed.com', true);
         console.log(`Added bot ${botId} to game ${this.id}`);
@@ -3145,9 +3183,15 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     });
     
     if (this.matchmakingTimerInterval) {
-      clearInterval(this.matchmakingTimerInterval);
+      clearTimeout(this.matchmakingTimerInterval);
       this.matchmakingTimerInterval = null;
     }
+    
+    if (this.matchmakingUpdateInterval) {
+      clearInterval(this.matchmakingUpdateInterval);
+      this.matchmakingUpdateInterval = null;
+    }
+    
     if (!this.winner) {
       Object.keys(this.players).forEach(playerId => {
         if (!this.players[playerId].isBot) {
