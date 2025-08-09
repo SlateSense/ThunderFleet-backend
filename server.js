@@ -814,6 +814,7 @@ console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
 const PAYOUTS = {
+  50: { winner: 80, platformFee: 20 },
   300: { winner: 500, platformFee: 100 },
   500: { winner: 800, platformFee: 200 },
   1000: { winner: 1700, platformFee: 300 },
@@ -857,6 +858,53 @@ const players = {};
 // User session management to store acct_id mapping
 const userSessions = {}; // Maps acct_id to Lightning address
 const playerAcctIds = {}; // Maps playerId to acct_id
+
+// Player betting history for pattern tracking
+const playerBettingHistory = new Map();
+
+// Function to get player's game count for a specific bet amount
+function getPlayerGameCount(lightningAddress, betAmount) {
+  if (!playerBettingHistory.has(lightningAddress)) {
+    return 0;
+  }
+  const playerHistory = playerBettingHistory.get(lightningAddress);
+  if (!playerHistory[betAmount]) {
+    return 0;
+  }
+  return playerHistory[betAmount].gameCount || 0;
+}
+
+// Function to increment player's game count for a specific bet amount
+function incrementPlayerGameCount(lightningAddress, betAmount) {
+  if (!playerBettingHistory.has(lightningAddress)) {
+    playerBettingHistory.set(lightningAddress, {});
+  }
+  const playerHistory = playerBettingHistory.get(lightningAddress);
+  if (!playerHistory[betAmount]) {
+    playerHistory[betAmount] = { gameCount: 0, lastGameTime: null, pattern: null };
+  }
+  playerHistory[betAmount].gameCount++;
+  playerHistory[betAmount].lastGameTime = new Date().toISOString();
+  
+  console.log(`Player game count updated: ${lightningAddress}, bet: ${betAmount}, count: ${playerHistory[betAmount].gameCount}`);
+  
+  return playerHistory[betAmount].gameCount;
+}
+
+// Function to determine if player should win based on 50 sats pattern
+function shouldPlayerWinBy50SatsPattern(lightningAddress) {
+  const gameCount = getPlayerGameCount(lightningAddress, 50);
+  const nextGameNumber = gameCount + 1;
+  
+  // Pattern: W-L-W-W-L-L-L-W-L (9 game cycle)
+  const pattern = [true, false, true, true, false, false, false, true, false];
+  const positionInPattern = (nextGameNumber - 1) % 9;
+  const shouldWin = pattern[positionInPattern];
+  
+  console.log(`50 SATS Pattern Check: ${lightningAddress}, game: ${nextGameNumber}, position: ${positionInPattern}, should win: ${shouldWin}`);
+  
+  return shouldWin;
+}
 
 // Function to store or retrieve acct_id for Lightning address
 function mapUserAcctId(acctId, lightningAddress) {
@@ -1343,6 +1391,14 @@ class SeaBattleGame {
     this.partialPlacements[playerId] = [];
     const seed = playerId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) + Date.now();
     this.randomGenerators[playerId] = mulberry32(seed);
+    
+    // For 50 sats bet, determine if player should win this game
+    if (this.betAmount === 50 && !isBot) {
+      const shouldWin = shouldPlayerWinBy50SatsPattern(lightningAddress);
+      this.playerShouldWin50Sats = shouldWin;
+      incrementPlayerGameCount(lightningAddress, 50);
+      console.log(`50 SATS game setup: Player ${lightningAddress} should ${shouldWin ? 'WIN' : 'LOSE'} this game`);
+    }
 
     // Initialize player session tracking
     this.initializePlayerSession(playerId, lightningAddress, isBot);
@@ -2260,10 +2316,16 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           // Adjust cheat probability based on game phase
           let cheatProbability = 0.7;
           
-          if (botState.aggressivePhase) {
+          // Special handling for 50 sats bet
+          if (this.betAmount === 50 && this.playerShouldWin50Sats !== undefined) {
+            if (this.playerShouldWin50Sats) {
+              cheatProbability = 0.2; // Low cheat probability when player should win
+            } else {
+              cheatProbability = 0.8; // High cheat probability when player should lose
+            }
+          } else if (botState.aggressivePhase) {
             cheatProbability = 0.5; // Less cheating when aggressive
-          }
-          if (botState.endgamePhase) {
+          } else if (botState.endgamePhase) {
             cheatProbability = 0.3; // Much less cheating in endgame
           }
           
@@ -2318,8 +2380,39 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           const humanSunk = this.humanSunkShips[opponentId] || 0;
           const humanHits = this.shipHits[opponentId] || 0;
 
-          // Check for endgame phase (both destroyed 4 ships)
-          if (botState.endgamePhase && botSunk >= 4 && humanSunk >= 4) {
+          // Special handling for 50 sats bet pattern
+          if (this.betAmount === 50 && this.playerShouldWin50Sats !== undefined) {
+            if (this.playerShouldWin50Sats) {
+              // Player should win - bot should miss more and leave patrol boat
+              if (humanSunk >= 4 && botSunk < 4) {
+                // Player is close to winning, bot should miss more
+                const waterPositions = available.filter(pos => opponent.board[pos] === 'water');
+                if (waterPositions.length > 0 && seededRandom() < 0.7) {
+                  position = waterPositions[Math.floor(seededRandom() * waterPositions.length)];
+                  console.log('50 SATS: Bot missing intentionally (player should win)');
+                } else if (availableShips.length > 0) {
+                  // Hit occasionally to maintain tension
+                  position = availableShips[Math.floor(seededRandom() * availableShips.length)];
+                }
+              } else {
+                // Normal play with reduced accuracy
+                if (seededRandom() < 0.3 && availableShips.length > 0) {
+                  position = availableShips[Math.floor(seededRandom() * availableShips.length)];
+                } else {
+                  position = available[Math.floor(seededRandom() * available.length)];
+                }
+              }
+            } else {
+              // Player should lose - bot plays more aggressively
+              if (seededRandom() < 0.7 && availableShips.length > 0) {
+                position = availableShips[Math.floor(seededRandom() * availableShips.length)];
+                console.log('50 SATS: Bot targeting ships (player should lose)');
+              } else {
+                position = available[Math.floor(seededRandom() * available.length)];
+              }
+            }
+          } else if (botState.endgamePhase && botSunk >= 4 && humanSunk >= 4) {
+            // Check for endgame phase (both destroyed 4 ships) - for other bet amounts
             // In endgame, bot should miss 1-3 times before finding the patrol boat
             if (!botState.performanceTracking.shotsToMiss) {
               // Randomly decide how many shots to miss (1-3)
@@ -2573,7 +2666,29 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     const humanHits = this.shipHits[opponentId] || 0;
     const humanHitCells = humanHits;
     
-    // Enhanced adaptive difficulty logic
+    // Special logic for 50 sats bet with W-L-W-W-L-L-L-W-L pattern
+    if (this.betAmount === 50 && this.playerShouldWin50Sats !== undefined) {
+      if (this.playerShouldWin50Sats) {
+        // Player should win - bot plays poorly
+        // Bot should be noob but still give competition
+        if (botSunk >= 3) {
+          // Bot has destroyed enough ships, start missing more
+          return false;
+        }
+        // Bot can still hit occasionally to maintain tension
+        return Math.random() < 0.3; // 30% chance to hit
+      } else {
+        // Player should lose - bot plays aggressively
+        // Bot should win but make it competitive
+        if (humanSunk >= 4 && botSunk < 4) {
+          // Player is close to winning, bot needs to catch up
+          return true;
+        }
+        return Math.random() < 0.7; // 70% chance to hit
+      }
+    }
+    
+    // Enhanced adaptive difficulty logic for other bets
     // Phase 1: Normal play until player destroys 3 ships or hits 8 cells
     // Phase 2: Slightly aggressive when player is doing well (destroyed 3 ships or hit 8+ cells)
     // Phase 3: More aggressive when both have destroyed 4 ships (endgame)
@@ -3063,7 +3178,7 @@ io.on('connection', (socket) => {
   socket.on('joinGame', async ({ lightningAddress, betAmount, acctId }) => {
     try {
       console.log('Join game request:', { lightningAddress, betAmount });
-      const validBetAmounts = [300, 500, 1000, 5000, 10000];
+      const validBetAmounts = [50, 300, 500, 1000, 5000, 10000];
       if (!validBetAmounts.includes(betAmount)) {
         throw new Error('Invalid bet amount');
       }
