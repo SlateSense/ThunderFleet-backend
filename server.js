@@ -446,19 +446,20 @@ app.post('/webhook', express.json(), (req, res) => {
           return res.status(400).send('No invoiceId in webhook payload');
         }
 
-        const socket = invoiceToSocket[invoiceId];
-        if (!socket) {
-          logger.warn(`Webhook warning: No socket found for invoice ${invoiceId}. Player may have disconnected.`);
-          return res.status(200).send('Webhook received but no socket found');
+        const socketId = invoiceToSocket[invoiceId];
+        if (!socketId) {
+          logger.warn(`Webhook warning: No socketId found for invoice ${invoiceId}. Player may have disconnected before mapping was stored.`);
+          return res.status(200).send('Webhook received but no socketId found');
         }
+        const sock = (io.sockets && io.sockets.sockets && (io.sockets.sockets.get ? io.sockets.sockets.get(socketId) : io.sockets.sockets[socketId])) || null;
 
         // Log payment verification
         const paymentData = {
           event: 'payment_verified',
-          playerId: socket.id,
+          playerId: socketId,
           invoiceId: invoiceId,
-          amount: players[socket.id]?.betAmount || 'unknown',
-          lightningAddress: players[socket.id]?.lightningAddress || 'unknown',
+          amount: players[socketId]?.betAmount || 'unknown',
+          lightningAddress: players[socketId]?.lightningAddress || 'unknown',
           timestamp: new Date().toISOString(),
           eventType: eventType
         };
@@ -466,42 +467,57 @@ app.post('/webhook', express.json(), (req, res) => {
         transactionLogger.info(paymentData);
         
         // Forward payment log to PC
-        logForwarder.logPayment(socket.id, paymentData);
+        logForwarder.logPayment(socketId, paymentData);
 
-        socket.emit('paymentVerified');
-        players[socket.id].paid = true;
-        logger.info('Payment verified for player', { playerId: socket.id, invoiceId });
+        if (sock) {
+          sock.emit('paymentVerified');
+        }
+        if (!players[socketId]) {
+          logger.warn(`Players record missing for ${socketId} on webhook for invoice ${invoiceId}`);
+          return res.status(200).send('Webhook processed but player not found');
+        }
+        players[socketId].paid = true;
+        logger.info('Payment verified for player', { playerId: socketId, invoiceId });
 
         let game = Object.values(games).find(g => 
-          Object.keys(g.players).length === 1 && g.betAmount === players[socket.id].betAmount,
+          Object.keys(g.players).length === 1 && g.betAmount === players[socketId].betAmount,
         );
         
         if (!game) {
           const gameId = `game_${Date.now()}`;
-          game = new SeaBattleGame(gameId, players[socket.id].betAmount);
+          game = new SeaBattleGame(gameId, players[socketId].betAmount);
           games[gameId] = game;
           
           // Log game creation
           gameLogger.info({
             event: 'game_created',
             gameId: gameId,
-            betAmount: players[socket.id].betAmount,
-            playerId: socket.id,
+            betAmount: players[socketId].betAmount,
+            playerId: socketId,
             timestamp: new Date().toISOString()
           });
         }
         
-        game.addPlayer(socket.id, players[socket.id].lightningAddress);
-        socket.join(game.id);
+        game.addPlayer(socketId, players[socketId].lightningAddress);
+        if (sock) {
+          sock.join(game.id);
+        } else {
+          // If socket is gone, immediately mark as disconnected and start timer
+          try {
+            game.handleDisconnect(socketId);
+          } catch (e) {
+            logger.warn(`Failed to start disconnect timer for offline player ${socketId}: ${e.message}`);
+          }
+        }
         
         // Update player session with payment sent status
-        console.log('💳 PAYMENT VERIFIED for:', players[socket.id].lightningAddress);
-        console.log('💰 Amount:', players[socket.id].betAmount, 'SATS');
-        game.updatePlayerSession(socket.id, {
+        console.log('💳 PAYMENT VERIFIED for:', players[socketId].lightningAddress);
+        console.log('💰 Amount:', players[socketId].betAmount, 'SATS');
+        game.updatePlayerSession(socketId, {
           paymentSent: true
         });
 
-        socket.emit('matchmakingTimer', { message: 'Estimated wait time: 10-25 seconds' });
+        // sock.emit('matchmakingTimer', { message: 'Estimated wait time: 10-25 seconds' });
         delete invoiceToSocket[invoiceId];
         break;
 
@@ -512,25 +528,28 @@ app.post('/webhook', express.json(), (req, res) => {
           return res.status(400).send('No invoiceId in webhook payload');
         }
 
-        const failedSocket = invoiceToSocket[failedInvoiceId];
-        if (failedSocket) {
+        const failedSocketId = invoiceToSocket[failedInvoiceId];
+        const failedSock = (io.sockets && io.sockets.sockets && (io.sockets.sockets.get ? io.sockets.sockets.get(failedSocketId) : io.sockets.sockets[failedSocketId])) || null;
+        if (failedSocketId) {
           // Log payment failure
           transactionLogger.info({
             event: 'payment_failed',
-            playerId: failedSocket.id,
+            playerId: failedSocketId,
             invoiceId: failedInvoiceId,
-            amount: players[failedSocket.id]?.betAmount || 'unknown',
-            lightningAddress: players[failedSocket.id]?.lightningAddress || 'unknown',
+            amount: players[failedSocketId]?.betAmount || 'unknown',
+            lightningAddress: players[failedSocketId]?.lightningAddress || 'unknown',
             timestamp: new Date().toISOString(),
             eventType: eventType
           });
           
-          failedSocket.emit('error', { message: 'Payment failed. Please try again.' });
-          logger.warn('Payment failed for player', { playerId: failedSocket.id, invoiceId: failedInvoiceId });
-          delete players[failedSocket.id];
+          if (failedSock) {
+            failedSock.emit('error', { message: 'Payment failed. Please try again.' });
+          }
+          logger.warn('Payment failed for player', { playerId: failedSocketId, invoiceId: failedInvoiceId });
+          delete players[failedSocketId];
           delete invoiceToSocket[failedInvoiceId];
         } else {
-          logger.warn(`Webhook warning: No socket found for failed invoice ${failedInvoiceId}. Player may have disconnected.`);
+          logger.warn(`Webhook warning: No socket mapping found for failed invoice ${failedInvoiceId}. Player may have disconnected.`);
         }
         break;
 
@@ -3485,7 +3504,8 @@ io.on('connection', (socket) => {
         amountUSD: invoiceData.amountUSD
       });
 
-      invoiceToSocket[invoiceData.invoiceId] = socket;
+      // Map invoice to socketId (not socket object) so webhook can proceed even if socket disconnects
+      invoiceToSocket[invoiceData.invoiceId] = socket.id;
 
       const paymentTimeout = setTimeout(() => {
         if (!players[socket.id]?.paid) {
@@ -3501,9 +3521,8 @@ io.on('connection', (socket) => {
       });
 
       socket.on('disconnect', () => {
-        clearTimeout(paymentTimeout);
-        delete invoiceToSocket[invoiceData.invoiceId];
-        console.log(`Socket ${socket.id} disconnected, removed from invoiceToSocket`);
+        // Retain mapping and timeout so webhook can still verify payment after disconnect
+        console.log(`Socket ${socket.id} disconnected. Retaining invoice mapping for ${invoiceData.invoiceId} until webhook or timeout.`);
       });
 
       // Don't create game yet - wait for payment verification
