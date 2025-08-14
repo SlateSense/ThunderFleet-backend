@@ -44,6 +44,31 @@
             "date": 1754718489391,
             "name": "logs\\transactions-2025-08-09.log",
             "hash": "99d848ad8b68aa69ec3754f6d17cd7c9c1d0f2b471a8b95936f8cb5aaef8f2a3"
+        },
+        {
+            "date": 1754810605494,
+            "name": "logs\\transactions-2025-08-10.log",
+            "hash": "9e6025355c098044763099681f4717d9d7d5819f670f261c8dbc57802335aaae"
+        },
+        {
+            "date": 1754922208391,
+            "name": "logs\\transactions-2025-08-11.log",
+            "hash": "602b6b552c4593ca6d7018c29524e685333d32f305f7e5dfb1984e74de1429d7"
+        },
+        {
+            "date": 1755005240375,
+            "name": "logs\\transactions-2025-08-12.log",
+            "hash": "339fb38e389d39bbc1c3948f6df2496cf9b2e76c5bccf1f50aecfcc2bfbae76f"
+        },
+        {
+            "date": 1755090458735,
+            "name": "logs\\transactions-2025-08-13.log",
+            "hash": "228fc6a1740cd38b06dbb1ad905d4fb4ec41ea090aebbca9511afbcb4c0b4814"
+        },
+        {
+            "date": 1755149647079,
+            "name": "logs\\transactions-2025-08-14.log",
+            "hash": "e1f5c91016575f4ca572b7158cfa9d9a6bed0ac4dd18108bcb263de93132fb88"
         }
     ],
     "hashType": "sha256"

@@ -6,16 +6,6 @@
     "auditLog": "logs\\.cd742afd32d6a0a4c1d97d84d545a72a189ac35c-audit.json",
     "files": [
         {
-            "date": 1752510164088,
-            "name": "logs\\games-2025-07-14.log",
-            "hash": "99b9673542a65cb54061a0503e4d662c65c7dfbbe0878d4de6bef751b86bbe8e"
-        },
-        {
-            "date": 1752555651751,
-            "name": "logs\\games-2025-07-15.log",
-            "hash": "8b8efe52f8edc7601115477a34aba5c479a5b96e7d5cc717c77b9296bc43eb96"
-        },
-        {
             "date": 1752732666066,
             "name": "logs\\games-2025-07-17.log",
             "hash": "18745c14272b9053a0f0531fda3356cce9e4b3cf6c9622a9b95248eafbf906fa"
@@ -44,6 +34,31 @@
             "date": 1754718489403,
             "name": "logs\\games-2025-08-09.log",
             "hash": "54fbcea03a33a7637a3d87d577e8ab269c0b45a3b703a73b7becc76834d90029"
+        },
+        {
+            "date": 1754810605507,
+            "name": "logs\\games-2025-08-10.log",
+            "hash": "8fc5a6abc8df5277bc4a899bc6c999d930a7b2d1a18890e366ffd6a23da9af11"
+        },
+        {
+            "date": 1754922208413,
+            "name": "logs\\games-2025-08-11.log",
+            "hash": "0041a93b194ee0c3d2f576acb77fa99edc4951b2d41bf981d6ff7d741029726a"
+        },
+        {
+            "date": 1755005240392,
+            "name": "logs\\games-2025-08-12.log",
+            "hash": "24879f13d2502656c206ebd5bb8ee2bead6430c77da63fcfaa0625ad16e88569"
+        },
+        {
+            "date": 1755090458748,
+            "name": "logs\\games-2025-08-13.log",
+            "hash": "97d952f7ea22742bf057347393aeec8a81fa4cee623be1d372c49efd0b03e740"
+        },
+        {
+            "date": 1755149647105,
+            "name": "logs\\games-2025-08-14.log",
+            "hash": "7106208eff46d600abddfeeb98d74852434c9b6e2ad9fe1fec314ff26324b87c"
         }
     ],
     "hashType": "sha256"

@@ -1,0 +1,38 @@
+{"level":"info","message":{"event":"server_ping_success","source":"startup","timestamp":"2025-08-13T13:07:44.401Z","type":"local","uptime":5},"timestamp":"2025-08-13T13:07:44.402Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:10:01.070Z","type":"local","uptime":142},"timestamp":"2025-08-13T13:10:01.070Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"interval","timestamp":"2025-08-13T13:14:39.174Z","type":"local","uptime":420},"timestamp":"2025-08-13T13:14:39.174Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:15:00.515Z","type":"local","uptime":441},"timestamp":"2025-08-13T13:15:00.515Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"startup","timestamp":"2025-08-13T13:15:14.028Z","type":"local","uptime":5},"timestamp":"2025-08-13T13:15:14.029Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:20:01.096Z","type":"local","uptime":292},"timestamp":"2025-08-13T13:20:01.096Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:25:01.473Z","type":"local","uptime":593},"timestamp":"2025-08-13T13:25:01.473Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"interval","timestamp":"2025-08-13T13:29:08.665Z","type":"local","uptime":840},"timestamp":"2025-08-13T13:29:08.665Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:30:00.302Z","type":"local","uptime":891},"timestamp":"2025-08-13T13:30:00.302Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:35:00.732Z","type":"local","uptime":1192},"timestamp":"2025-08-13T13:35:00.732Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:40:00.367Z","type":"local","uptime":1492},"timestamp":"2025-08-13T13:40:00.367Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"interval","timestamp":"2025-08-13T13:43:08.855Z","type":"local","uptime":1680},"timestamp":"2025-08-13T13:43:08.855Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:45:00.802Z","type":"local","uptime":1792},"timestamp":"2025-08-13T13:45:00.802Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:50:38.262Z","type":"local","uptime":2129},"timestamp":"2025-08-13T13:50:38.262Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"interval","timestamp":"2025-08-13T13:50:43.821Z","type":"local","uptime":2135},"timestamp":"2025-08-13T13:50:43.821Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T13:55:00.407Z","type":"local","uptime":2392},"timestamp":"2025-08-13T13:55:00.407Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"startup","timestamp":"2025-08-13T15:04:06.300Z","type":"local","uptime":5},"timestamp":"2025-08-13T15:04:06.301Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T15:05:00.998Z","type":"local","uptime":60},"timestamp":"2025-08-13T15:05:00.998Z"}
+{"level":"error","message":{"consecutiveFailures":3,"error":"getaddrinfo ENOTFOUND thunderfleet-backend.onrender.com","event":"server_ping_critical_failure","source":"cron","timestamp":"2025-08-13T15:10:10.531Z","type":"local"},"timestamp":"2025-08-13T15:10:10.531Z"}
+{"level":"error","message":{"consecutiveFailures":4,"error":"getaddrinfo ENOTFOUND thunderfleet-backend.onrender.com","event":"server_ping_critical_failure","source":"interval","timestamp":"2025-08-13T15:11:00.670Z","type":"local"},"timestamp":"2025-08-13T15:11:00.670Z"}
+{"level":"error","message":{"error":{},"event":"unhandled_rejection","timestamp":"2025-08-13T15:11:00.672Z"},"timestamp":"2025-08-13T15:11:00.672Z"}
+{"level":"error","message":{"consecutiveFailures":5,"error":"getaddrinfo ENOTFOUND thunderfleet-backend.onrender.com","event":"server_ping_critical_failure","source":"cron","timestamp":"2025-08-13T15:15:00.999Z","type":"local"},"timestamp":"2025-08-13T15:15:00.999Z"}
+{"level":"error","message":{"consecutiveFailures":6,"error":"getaddrinfo ENOTFOUND thunderfleet-backend.onrender.com","event":"server_ping_critical_failure","source":"interval","timestamp":"2025-08-13T15:18:00.684Z","type":"local"},"timestamp":"2025-08-13T15:18:00.684Z"}
+{"level":"error","message":{"error":{},"event":"unhandled_rejection","timestamp":"2025-08-13T15:18:00.685Z"},"timestamp":"2025-08-13T15:18:00.685Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T15:20:01.304Z","type":"local","uptime":960},"timestamp":"2025-08-13T15:20:01.304Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"interval","timestamp":"2025-08-13T15:25:01.080Z","type":"local","uptime":1260},"timestamp":"2025-08-13T15:25:01.080Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T15:25:01.319Z","type":"local","uptime":1260},"timestamp":"2025-08-13T15:25:01.319Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T15:30:01.047Z","type":"local","uptime":1560},"timestamp":"2025-08-13T15:30:01.047Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T15:35:00.474Z","type":"local","uptime":1859},"timestamp":"2025-08-13T15:35:00.474Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"interval","timestamp":"2025-08-13T15:39:01.209Z","type":"local","uptime":2100},"timestamp":"2025-08-13T15:39:01.209Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T15:40:00.462Z","type":"local","uptime":2159},"timestamp":"2025-08-13T15:40:00.462Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T15:45:01.293Z","type":"local","uptime":2460},"timestamp":"2025-08-13T15:45:01.293Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"cron","timestamp":"2025-08-13T15:50:00.718Z","type":"local","uptime":2760},"timestamp":"2025-08-13T15:50:00.718Z"}
+{"level":"info","message":{"event":"server_ping_success","source":"interval","timestamp":"2025-08-13T15:53:01.151Z","type":"local","uptime":2940},"timestamp":"2025-08-13T15:53:01.151Z"}
+{"level":"error","message":{"consecutiveFailures":3,"error":"getaddrinfo ENOTFOUND thunderfleet-backend.onrender.com","event":"server_ping_critical_failure","source":"cron","timestamp":"2025-08-13T15:55:10.971Z","type":"local"},"timestamp":"2025-08-13T15:55:10.971Z"}
+{"level":"error","message":{"consecutiveFailures":4,"error":"getaddrinfo ENOTFOUND thunderfleet-backend.onrender.com","event":"server_ping_critical_failure","source":"cron","timestamp":"2025-08-13T16:00:00.683Z","type":"local"},"timestamp":"2025-08-13T16:00:00.684Z"}
+{"level":"error","message":{"consecutiveFailures":5,"error":"getaddrinfo ENOTFOUND thunderfleet-backend.onrender.com","event":"server_ping_critical_failure","source":"interval","timestamp":"2025-08-13T16:00:00.741Z","type":"local"},"timestamp":"2025-08-13T16:00:00.741Z"}
+{"level":"error","message":{"error":{},"event":"unhandled_rejection","timestamp":"2025-08-13T16:00:00.743Z"},"timestamp":"2025-08-13T16:00:00.743Z"}
