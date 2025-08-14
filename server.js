@@ -2136,6 +2136,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     const opponentId = Object.keys(this.players).find(id => id !== playerId);
     const opponent = this.players[opponentId];
     const botState = this.botState[playerId];
+    const noobMode = this.patternFairGame && this.patternFairGame[opponentId];
     
     // Log bot's shot for debugging
     const humanSunk = this.humanSunkShips[opponentId] || 0;
@@ -2150,6 +2151,14 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       opponent.board[position] = 'hit';
       this.shipHits[playerId]++;
       botState.lastHit = position;
+      // In fair games (noob mode), remember adjacents for more human-like follow-up
+      if (noobMode) {
+        const adjacents = this._botAdjacents(position, botState);
+        const uniqueAdj = [...new Set(adjacents)].filter(pos => !botState.triedPositions.has(pos));
+        const existing = botState.noobQueue || [];
+        botState.noobQueue = [...existing, ...adjacents].filter((pos, idx, arr) => arr.indexOf(pos) === idx);
+        botState.lastNoobHit = position;
+      }
 
       const ship = opponent.ships.find(s => s.positions.includes(position));
       if (ship) {
@@ -2195,6 +2204,12 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           
           if (botState.targets.length > 0) {
             botState.currentTarget = botState.targets[0];
+          }
+
+          // In noob mode, clear adjacency queue after sinking a ship
+          if (noobMode) {
+            botState.noobQueue = [];
+            botState.lastNoobHit = null;
           }
 
           const dir = thisTarget.orientation === 'horizontal' ? 1 : GRID_COLS;
@@ -2270,16 +2285,27 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       setTimeout(() => {
         const noobMode = this.patternFairGame && this.patternFairGame[opponentId];
         if (noobMode) {
-          // Fair game: bot plays like a noob (mostly random, no cheating or targeting)
+          // Fair game: prefer adjacent follow-ups if we recently hit; otherwise mostly random
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
             .filter(pos => !botState.triedPositions.has(pos));
           let position = null;
           if (available.length > 0) {
-            const waterPositions = available.filter(pos => opponent.board[pos] === 'water');
-            if (waterPositions.length > 0 && seededRandom() < 0.8) {
-              position = waterPositions[Math.floor(seededRandom() * waterPositions.length)];
+            const queue = (botState.noobQueue || []).filter(pos => 
+              !botState.triedPositions.has(pos) && 
+              opponent.board[pos] !== 'hit' && 
+              opponent.board[pos] !== 'miss'
+            );
+            if (queue.length > 0 && seededRandom() < 0.65) {
+              position = queue.shift();
+              // Persist the trimmed queue
+              botState.noobQueue = queue;
             } else {
-              position = available[Math.floor(seededRandom() * available.length)];
+              const waterPositions = available.filter(pos => opponent.board[pos] === 'water');
+              if (waterPositions.length > 0 && seededRandom() < 0.8) {
+                position = waterPositions[Math.floor(seededRandom() * waterPositions.length)];
+              } else {
+                position = available[Math.floor(seededRandom() * available.length)];
+              }
             }
           }
           if (position !== null && position !== undefined) {
@@ -2490,6 +2516,8 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       lastHitShip: null,
       lastHitPosition: null,
       targets: [],
+      noobQueue: [],
+      lastNoobHit: null,
       aggressivePhase: false,
       endgamePhase: false,
       performanceTracking: {
@@ -3220,12 +3248,19 @@ io.on('connection', (socket) => {
         throw new Error('Invalid bet amount');
       }
 
-      // Validate and format Lightning address
-      if (!lightningAddress || lightningAddress.trim() === '') {
+      // Resolve and format Lightning address (allow persistence via acctId)
+      let resolvedAddress = lightningAddress && lightningAddress.trim() !== '' ? lightningAddress : null;
+      if (!resolvedAddress && acctId) {
+        const stored = getLightningAddressByAcctId(acctId);
+        if (stored) {
+          resolvedAddress = stored;
+        }
+      }
+      if (!resolvedAddress) {
         throw new Error('Lightning address is required');
       }
       
-      const formattedAddress = lightningAddress.includes('@') ? lightningAddress : `${lightningAddress}@speed.app`;
+      const formattedAddress = resolvedAddress.includes('@') ? resolvedAddress : `${resolvedAddress}@speed.app`;
       console.log(`Player ${socket.id} attempted deposit: ${betAmount} SATS with Lightning address ${formattedAddress}`);
       
       // Map acctId to Lightning address if provided
