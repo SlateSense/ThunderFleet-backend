@@ -2054,6 +2054,34 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       const sortedHits = [...target.hits].sort((a, b) => a - b);
       const dir = target.orientation === 'horizontal' ? 1 : GRID_COLS;
       
+      // Fair mode: one-time perpendicular "wrong orientation" try near an end
+      const opponentId = Object.keys(this.players).find(id => this.players[id] === opponent);
+      const fairMode = this.patternFairGame && opponentId && this.patternFairGame[opponentId];
+      if (fairMode && !target.wrongOrientationOnce && Math.random() < 0.2) {
+        const end = Math.random() < 0.5 ? sortedHits[0] : sortedHits[sortedHits.length - 1];
+        const row = Math.floor(end / GRID_COLS);
+        const col = end % GRID_COLS;
+        const perpCandidates = [];
+        if (target.orientation === 'horizontal') {
+          const up = end - GRID_COLS;
+          const down = end + GRID_COLS;
+          if (up >= 0) perpCandidates.push(up);
+          if (down < GRID_SIZE) perpCandidates.push(down);
+        } else {
+          const left = end - 1;
+          const right = end + 1;
+          if (left >= 0 && Math.floor(left / GRID_COLS) === row) perpCandidates.push(left);
+          if (right < GRID_SIZE && Math.floor(right / GRID_COLS) === row) perpCandidates.push(right);
+        }
+        const choice = perpCandidates.filter(p => !botState.triedPositions.has(p) && (opponent.board[p] === 'ship' || opponent.board[p] === 'water'));
+        if (choice.length > 0) {
+          target.wrongOrientationOnce = true;
+          return choice[Math.floor(Math.random() * choice.length)];
+        } else {
+          target.wrongOrientationOnce = true; // mark as consumed to avoid repeat
+        }
+      }
+
       const ends = [sortedHits[0], sortedHits[sortedHits.length - 1]];
       
       for (const end of ends) {
@@ -2128,6 +2156,49 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
     }
     
     return null;
+  }
+
+  _chooseHumanLikeSearchShot(botState, opponent, seededRandom, avoidSink) {
+    // Unknown, untried cells
+    const unknown = Array.from({ length: GRID_SIZE }, (_, i) => i)
+      .filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'hit' && opponent.board[pos] !== 'miss');
+    if (unknown.length === 0) return null;
+
+    // Largest alive ship to decide parity usage
+    const aliveShips = (opponent.ships || []).filter(s => !s.sunk);
+    const maxLen = aliveShips.length ? Math.max(...aliveShips.map(s => s.positions.length)) : 3;
+    const useParity = maxLen >= 3;
+
+    // Persist a parity color per bot
+    if (botState.parityColor === undefined) {
+      botState.parityColor = Math.floor(seededRandom() * 2);
+    }
+
+    let pool = unknown;
+    if (useParity && seededRandom() < 0.7) {
+      const parity = botState.parityColor;
+      const parityCells = unknown.filter(p => ((Math.floor(p / GRID_COLS) + (p % GRID_COLS)) % 2) === parity);
+      if (parityCells.length > 0) pool = parityCells;
+    }
+
+    // Prefer water to avoid accidental sinks when capped
+    const waterPool = pool.filter(pos => opponent.board[pos] === 'water');
+    if (waterPool.length > 0) {
+      const bias = avoidSink ? 0.9 : 0.75;
+      if (seededRandom() < bias) pool = waterPool;
+    }
+
+    // Light de-clustering: sometimes avoid cells adjacent to tried ones
+    if (pool.length > 6 && seededRandom() < 0.4) {
+      const filtered = pool.filter(pos => {
+        const adj = [pos - 1, pos + 1, pos - GRID_COLS, pos + GRID_COLS]
+          .filter(a => a >= 0 && a < GRID_SIZE);
+        return adj.every(a => !botState.triedPositions.has(a));
+      });
+      if (filtered.length > 0) pool = filtered;
+    }
+
+    return pool[Math.floor(seededRandom() * pool.length)];
   }
 
   botFireShotAtPosition(playerId, position) {
@@ -2281,6 +2352,12 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       if (botState.aggressivePhase) {
         thinkingTime = Math.floor(seededRandom() * 800) + 600; // Faster when aggressive
       }
+      // In fair mode, think a bit longer with occasional hesitation
+      const fairNow = this.patternFairGame && this.patternFairGame[opponentId];
+      if (fairNow) {
+        thinkingTime = Math.floor(seededRandom() * 900) + 900; // 0.9–1.8s
+        if (seededRandom() < 0.2) thinkingTime += Math.floor(seededRandom() * 600); // rare hesitation
+      }
 
       setTimeout(() => {
         const noobMode = this.patternFairGame && this.patternFairGame[opponentId];
@@ -2288,7 +2365,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           // Fair game strict behavior: focus to sink when allowed; otherwise keep searching without sinking
           const humanId = opponentId;
           const allowedCap = this.getFairAllowedBotSinks(playerId, humanId);
-          const botSunk = (this.humanSunkShips[playerId] || 0);
+          const botSunk = (this.botSunkShips[playerId] || 0);
           const avoidSink = botSunk >= allowedCap;
 
           // Build available list (not tried and not already hit/miss)
@@ -2314,7 +2391,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
             }
           }
 
-          // If allowed to sink more, strictly focus on finishing current target
+          // If allowed to sink more, mostly focus on finishing current target
           if (!avoidSink && currentTargetObj) {
             position = this._botNextInLine(currentTargetObj, botState, opponent);
             if (position === null || position === undefined) {
@@ -2336,20 +2413,25 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
             // Try adjacency queue if present and we are allowed to hit
             const queue = (botState.noobQueue || []).filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'hit' && opponent.board[pos] !== 'miss');
             if (queue.length > 0 && !avoidSink) {
-              position = queue.shift();
+              if (seededRandom() < 0.3) {
+                const idx = Math.floor(seededRandom() * queue.length);
+                position = queue.splice(idx, 1)[0];
+              } else {
+                position = queue.shift();
+              }
+              // Occasionally shuffle remaining queue to avoid deterministic order
+              if (queue.length > 3 && seededRandom() < 0.25) {
+                for (let i = queue.length - 1; i > 0; i--) {
+                  const j = Math.floor(seededRandom() * (i + 1));
+                  [queue[i], queue[j]] = [queue[j], queue[i]];
+                }
+              }
               botState.noobQueue = queue;
             }
           }
 
           if (position === null || position === undefined) {
-            // Prefer water to avoid accidental sinks when capped
-            const waterPositions = available.filter(pos => opponent.board[pos] === 'water');
-            if (waterPositions.length > 0) {
-              const bias = avoidSink ? 0.95 : 0.8;
-              if (seededRandom() < bias) {
-                position = waterPositions[Math.floor(seededRandom() * waterPositions.length)];
-              }
-            }
+            position = this._chooseHumanLikeSearchShot(botState, opponent, seededRandom, avoidSink);
           }
 
           if (position === null || position === undefined) {
@@ -2376,7 +2458,9 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           if (position !== null && position !== undefined) {
             this.botFireShotAtPosition(playerId, position);
             if (opponent.board[position] === 'hit') {
-              setTimeout(() => this.botFireShot(playerId), Math.floor(seededRandom() * 1200) + 800);
+              let delay = Math.floor(seededRandom() * 900) + 900; // 0.9–1.8s
+              if (seededRandom() < 0.2) delay += Math.floor(seededRandom() * 700); // rare hesitation
+              setTimeout(() => this.botFireShot(playerId), delay);
             }
           }
           return;
@@ -2385,7 +2469,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         const remainingShipCells = opponent.board
           .map((cell, idx) => cell === 'ship' ? idx : null)
           .filter(idx => idx !== null && !botState.triedPositions.has(idx));
-        if (remainingShipCells.length > 0 && remainingShipCells.length <= 3) {
+        if (remainingShipCells.length > 0 && remainingShipCells.length <= 3 && !noobMode) {
           this._botTargetAndDestroy(playerId, opponentId, remainingShipCells);
           return;
         }
