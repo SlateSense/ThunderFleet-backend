@@ -218,9 +218,7 @@ app.get('/', (req, res) => {
   res.status(200).send('Thunderfleet Backend is running');
 });
 
-app.get('/health', (req, res) => {
-  res.status(200).send('OK');
-});
+// NOTE: Simple '/health' route removed; enhanced JSON health endpoint is defined later.
 
 // API endpoint to get payout information for display in the app
 app.get('/api/payout-info', (req, res) => {
@@ -1900,8 +1898,8 @@ class SeaBattleGame {
         const expected = pattern[record.index % pattern.length]; // 'W' or 'L'
         this.expectedHumanResult = expected;
         this.patternKey = key;
-        // Fair/noob mode only applies for 300+ sats bets per requirements
-        this.patternFairGame = { [humanId]: expected === 'W' && this.betAmount >= 300 };
+        // Fair/noob mode applies for all fair (W) games, including 50 SATS
+        this.patternFairGame = { [humanId]: expected === 'W' };
         // Ensure bot is not aggressive/cheating in fair games
         const botId = Object.keys(this.players).find(id => this.players[id].isBot);
         if (botId && this.patternFairGame[humanId]) {
@@ -2835,14 +2833,25 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
 
   async endGame(playerId) {
     if (this.winner) return; // Prevent endGame from running multiple times
+
+    // Determine actual end-state (who legitimately sunk all ships)
+    const humanIds = Object.keys(this.players).filter(id => !this.players[id].isBot);
+    const humanId = humanIds.length === 1 ? humanIds[0] : null;
+    const botId = humanId ? Object.keys(this.players).find(id => this.players[id].isBot) : null;
+    const humanHitCount = humanId ? (this.shipHits[humanId] || 0) : 0;
+    const botHitCount = botId ? (this.shipHits[botId] || 0) : 0;
+    const humanHasSunkAllBotShips = humanId ? humanHitCount >= this.totalShipCells : false;
+    const botHasSunkAllHumanShips = botId ? botHitCount >= this.totalShipCells : false;
     
-    // Apply pattern-based winner override if applicable
+    // Apply pattern-based winner override only if it matches legitimate sinks
     try {
-      const humanIds = Object.keys(this.players).filter(id => !this.players[id].isBot);
-      if (humanIds.length === 1 && this.expectedHumanResult) {
-        const humanId = humanIds[0];
-        const botId = Object.keys(this.players).find(id => this.players[id].isBot);
-        const overrideWinnerId = this.expectedHumanResult === 'W' ? humanId : botId;
+      if (humanId && botId && this.expectedHumanResult) {
+        let overrideWinnerId = null;
+        if (this.expectedHumanResult === 'W' && humanHasSunkAllBotShips) {
+          overrideWinnerId = humanId;
+        } else if (this.expectedHumanResult === 'L' && botHasSunkAllHumanShips) {
+          overrideWinnerId = botId;
+        }
         if (overrideWinnerId && playerId !== overrideWinnerId) {
           console.log(`Pattern override applied for game ${this.id}: expected ${this.expectedHumanResult}, setting winner to ${overrideWinnerId}`);
           playerId = overrideWinnerId;
@@ -2919,7 +2928,8 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         });
         console.log(`Bot ${playerId} won the game. Bet amount ${this.betAmount} SATS retained by the house.`);
       } else {
-        // Log human victory and payout details
+        // Log human victory and payout details (payout only if human legitimately sank all bot ships)
+        const legitimateHumanWin = humanId && playerId === humanId && humanHasSunkAllBotShips;
         gameLogger.info({
           event: 'game_ended',
           gameId: this.id,
@@ -2929,9 +2939,10 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           betAmount: this.betAmount,
           players: allPlayers,
           payout: {
-            winner: payout.winner,
-            platformFee: payout.platformFee,
-            totalCollected: this.betAmount * 2
+            winner: legitimateHumanWin ? payout.winner : 0,
+            platformFee: legitimateHumanWin ? payout.platformFee : 0,
+            totalCollected: this.betAmount * 2,
+            withheld: legitimateHumanWin ? false : true
           },
           timestamp: new Date().toISOString()
         });
@@ -2939,71 +2950,91 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         // Announce winner first
         humanPlayers.forEach(id => {
           io.to(id).emit('gameEnd', {
-            message: id === playerId ? `You won! ${payout.winner} sats are being sent!` : 'You lost! Better luck next time!',
+            message: id === playerId
+              ? (legitimateHumanWin ? `You won! ${payout.winner} sats are being sent!` : 'You won by forfeit. No payout.')
+              : 'You lost! Better luck next time!',
           });
         });
 
-        // Process payments using instant send API
-        console.log(`Processing instant payment to winner: ${winnerAddress}, amount: ${payout.winner} SATS`);
-        
-        // Send SATS directly without conversion
-        const winnerPayment = await sendInstantPayment(
-          winnerAddress,
-          payout.winner,
-          'SATS',
-          'SATS',
-          `Sea Battle payout - Game ${this.id} - Winner: ${payout.winner} SATS`
-        );
-        console.log('✅ Winner instant payment sent:', winnerPayment);
-        console.log('🎉 GAME COMPLETED - Winner:', winnerAddress, 'Amount:', payout.winner, 'SATS');
+        if (legitimateHumanWin) {
+          // Process payments using instant send API
+          console.log(`Processing instant payment to winner: ${winnerAddress}, amount: ${payout.winner} SATS`);
+          
+          // Send SATS directly without conversion
+          const winnerPayment = await sendInstantPayment(
+            winnerAddress,
+            payout.winner,
+            'SATS',
+            'SATS',
+            `Sea Battle payout - Game ${this.id} - Winner: ${payout.winner} SATS`
+          );
+          console.log('✅ Winner instant payment sent:', winnerPayment);
+          console.log('🎉 GAME COMPLETED - Winner:', winnerAddress, 'Amount:', payout.winner, 'SATS');
 
-        // Log winner payment
-        transactionLogger.info({
-          event: 'payout_sent',
-          gameId: this.id,
-          playerId: playerId,
-          recipient: winnerAddress,
-          amount: payout.winner,
-          currency: 'SATS',
-          paymentResponse: winnerPayment,
-          timestamp: new Date().toISOString()
-        });
-        
-        // Update winner's session with successful payout
-        this.updatePlayerSession(playerId, {
-          paymentReceived: true,
-          payoutStatus: 'sent'
-        });
+          // Log winner payment
+          transactionLogger.info({
+            event: 'payout_sent',
+            gameId: this.id,
+            playerId: playerId,
+            recipient: winnerAddress,
+            amount: payout.winner,
+            currency: 'SATS',
+            paymentResponse: winnerPayment,
+            timestamp: new Date().toISOString()
+          });
+          
+          // Update winner's session with successful payout
+          this.updatePlayerSession(playerId, {
+            paymentReceived: true,
+            payoutStatus: 'sent'
+          });
 
-        // Send platform fee (no extra winner fee)
-        const platformFee = await sendInstantPayment(
-          'slatesense@speed.app',
-          payout.platformFee,
-          'SATS',
-          'SATS',
-          `Sea Battle platform fee - Game ${this.id} - Fee: ${payout.platformFee} SATS`
-        );
-        console.log('Platform fee instant payment sent:', platformFee);
+          // Send platform fee (no extra winner fee)
+          const platformFee = await sendInstantPayment(
+            'slatesense@speed.app',
+            payout.platformFee,
+            'SATS',
+            'SATS',
+            `Sea Battle platform fee - Game ${this.id} - Fee: ${payout.platformFee} SATS`
+          );
+          console.log('Platform fee instant payment sent:', platformFee);
 
-        // Log platform fee payment
-        transactionLogger.info({
-          event: 'platform_fee_sent',
-          gameId: this.id,
-          recipient: 'slatesense@speed.app',
-          amount: payout.platformFee,
-          currency: 'SATS',
-          paymentResponse: platformFee,
-          timestamp: new Date().toISOString()
-        });
+          // Log platform fee payment
+          transactionLogger.info({
+            event: 'platform_fee_sent',
+            gameId: this.id,
+            recipient: 'slatesense@speed.app',
+            amount: payout.platformFee,
+            currency: 'SATS',
+            paymentResponse: platformFee,
+            timestamp: new Date().toISOString()
+          });
 
-        // Confirm payment transaction to the client
-        io.to(this.id).emit('transaction', {
-          message: `${payout.winner} sats sent to winner.`,
-        });
+          // Confirm payment transaction to the client
+          io.to(this.id).emit('transaction', {
+            message: `${payout.winner} sats sent to winner.`,
+          });
 
-        console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
-        console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
-        console.log(`Platform fee processed: ${payout.platformFee} SATS to slatesense@speed.app`);
+          console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
+          console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
+          console.log(`Platform fee processed: ${payout.platformFee} SATS to slatesense@speed.app`);
+        } else {
+          // No payout on non-legitimate win (e.g., disconnect or not all ships sunk)
+          this.updatePlayerSession(playerId, {
+            payoutAmount: 0,
+            payoutStatus: 'not_applicable'
+          });
+          transactionLogger.info({
+            event: 'payout_withheld',
+            gameId: this.id,
+            playerId: playerId,
+            recipient: winnerAddress,
+            amount: 0,
+            currency: 'SATS',
+            reason: 'non_legitimate_win',
+            timestamp: new Date().toISOString()
+          });
+        }
       }
     } catch (error) {
       logger.error('Payment error in endGame', {
@@ -3558,6 +3589,25 @@ async function pingServer(source) {
           });
           
           return true;
+        } else {
+          // Treat non-200 (<500) as a soft failure for retry/backoff
+          consecutiveFailures++;
+          if (response.status === 503) {
+            serverHealth.unavailableCount++;
+            serverHealth.serviceErrors++;
+            serverHealth.lastError = {
+              time: new Date().toISOString(),
+              message: `Healthcheck non-200 status: ${response.status}`,
+              status: response.status
+            };
+            await handleServerRecovery();
+          }
+          if (retryCount < MAX_RETRIES - 1) {
+            console.log(`Retrying in ${RETRY_DELAY}ms due to status ${response.status}...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          }
+          retryCount++;
+          continue;
         }
       } catch (error) {
         const isServiceUnavailable = error.response && error.response.status === 503;
@@ -3598,19 +3648,7 @@ async function pingServer(source) {
           // If we're getting persistent 503s, try to recover
           if (isServiceUnavailable && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
             console.log('🔄 Attempting server recovery due to persistent 503 errors');
-            // Force garbage collection if available
-            if (global.gc) {
-              global.gc();
-            }
-            // Clear any stuck games
-            Object.keys(games).forEach(gameId => {
-              try {
-                const game = games[gameId];
-                if (game) game.cleanup();
-              } catch (cleanupError) {
-                console.error('Error during cleanup:', cleanupError);
-              }
-            });
+            await handleServerRecovery();
           }
         }
 
