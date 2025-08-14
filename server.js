@@ -2285,29 +2285,94 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       setTimeout(() => {
         const noobMode = this.patternFairGame && this.patternFairGame[opponentId];
         if (noobMode) {
-          // Fair game: prefer adjacent follow-ups if we recently hit; otherwise mostly random
+          // Fair game strict behavior: focus to sink when allowed; otherwise keep searching without sinking
+          const humanId = opponentId;
+          const allowedCap = this.getFairAllowedBotSinks(playerId, humanId);
+          const botSunk = (this.humanSunkShips[playerId] || 0);
+          const avoidSink = botSunk >= allowedCap;
+
+          // Build available list (not tried and not already hit/miss)
           const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
-            .filter(pos => !botState.triedPositions.has(pos));
+            .filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'hit' && opponent.board[pos] !== 'miss');
+
           let position = null;
-          if (available.length > 0) {
-            const queue = (botState.noobQueue || []).filter(pos => 
-              !botState.triedPositions.has(pos) && 
-              opponent.board[pos] !== 'hit' && 
-              opponent.board[pos] !== 'miss'
-            );
-            if (queue.length > 0 && seededRandom() < 0.65) {
-              position = queue.shift();
-              // Persist the trimmed queue
-              botState.noobQueue = queue;
-            } else {
-              const waterPositions = available.filter(pos => opponent.board[pos] === 'water');
-              if (waterPositions.length > 0 && seededRandom() < 0.8) {
-                position = waterPositions[Math.floor(seededRandom() * waterPositions.length)];
-              } else {
-                position = available[Math.floor(seededRandom() * available.length)];
+
+          // Resolve current target robustly
+          let currentTargetObj = null;
+          if (botState.currentTarget) {
+            if (typeof botState.currentTarget === 'string') {
+              currentTargetObj = (botState.targets || []).find(t => t.shipId === botState.currentTarget && !t.sunk) || null;
+            } else if (typeof botState.currentTarget === 'object' && botState.currentTarget.shipId) {
+              currentTargetObj = (botState.targets || []).find(t => t.shipId === botState.currentTarget.shipId && !t.sunk) || botState.currentTarget;
+            }
+          }
+          if (!currentTargetObj && botState.targets && botState.targets.length) {
+            const unfinishedTargets = botState.targets.filter(t => !t.sunk && ((t.queue && t.queue.length > 0) || (t.hits && t.hits.length > 0)));
+            if (unfinishedTargets.length > 0) {
+              currentTargetObj = unfinishedTargets[0];
+              botState.currentTarget = currentTargetObj.shipId;
+            }
+          }
+
+          // If allowed to sink more, strictly focus on finishing current target
+          if (!avoidSink && currentTargetObj) {
+            position = this._botNextInLine(currentTargetObj, botState, opponent);
+            if (position === null || position === undefined) {
+              if (currentTargetObj.queue && currentTargetObj.queue.length > 0) {
+                position = currentTargetObj.queue.shift();
+              }
+            }
+            if ((position === null || position === undefined) && currentTargetObj.shipId) {
+              const ship = opponent.ships.find(s => s.name === currentTargetObj.shipId);
+              if (ship) {
+                const unhit = ship.positions.find(pos => opponent.board[pos] !== 'hit' && opponent.board[pos] !== 'miss' && !botState.triedPositions.has(pos));
+                if (unhit !== undefined) position = unhit;
               }
             }
           }
+
+          // Otherwise, or if no current target, search like a human without finishing ships
+          if (position === null || position === undefined) {
+            // Try adjacency queue if present and we are allowed to hit
+            const queue = (botState.noobQueue || []).filter(pos => !botState.triedPositions.has(pos) && opponent.board[pos] !== 'hit' && opponent.board[pos] !== 'miss');
+            if (queue.length > 0 && !avoidSink) {
+              position = queue.shift();
+              botState.noobQueue = queue;
+            }
+          }
+
+          if (position === null || position === undefined) {
+            // Prefer water to avoid accidental sinks when capped
+            const waterPositions = available.filter(pos => opponent.board[pos] === 'water');
+            if (waterPositions.length > 0) {
+              const bias = avoidSink ? 0.95 : 0.8;
+              if (seededRandom() < bias) {
+                position = waterPositions[Math.floor(seededRandom() * waterPositions.length)];
+              }
+            }
+          }
+
+          if (position === null || position === undefined) {
+            // Fallback: any available
+            if (available.length > 0) {
+              position = available[Math.floor(seededRandom() * available.length)];
+            }
+          }
+
+          // Safety: if capped, avoid choosing a shot that would immediately sink a ship
+          if (avoidSink && position !== null && position !== undefined && opponent.board[position] === 'ship') {
+            const ship = opponent.ships.find(s => s.positions.includes(position) && !s.sunk);
+            if (ship) {
+              const remainingUnhit = ship.positions.filter(pos => opponent.board[pos] !== 'hit');
+              if (remainingUnhit.length <= 1) {
+                const waterPositions = available.filter(pos => opponent.board[pos] === 'water');
+                if (waterPositions.length > 0) {
+                  position = waterPositions[Math.floor(seededRandom() * waterPositions.length)];
+                }
+              }
+            }
+          }
+
           if (position !== null && position !== undefined) {
             this.botFireShotAtPosition(playerId, position);
             if (opponent.board[position] === 'hit') {
@@ -2527,6 +2592,41 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       }
     };
     return this.botState[playerId];
+  }
+
+  getFairAllowedBotSinks(botId, humanId) {
+    try {
+      const humanSunk = this.humanSunkShips[humanId] || 0;
+      const humanShots = this.playerSessions[humanId]?.shotsFired || 0;
+      const botState = this.botState[botId] || {};
+      let cap = 0;
+
+      if (humanShots >= 45) {
+        cap = 4;
+      } else if (humanSunk >= 5) {
+        // After human finds 5th, maintain chosen cap from the 4-ships phase
+        cap = botState.fairPacingMaxAtFour || 2;
+      } else if (humanSunk >= 4) {
+        if (!botState.fairPacingMaxAtFour) {
+          const seededRandom = this.randomGenerators[botId] || Math.random;
+          botState.fairPacingMaxAtFour = seededRandom() < 0.5 ? 2 : 3;
+          this.botState[botId] = { ...this.botState[botId], fairPacingMaxAtFour: botState.fairPacingMaxAtFour };
+        }
+        cap = botState.fairPacingMaxAtFour;
+      } else if (humanSunk >= 3) {
+        cap = 1; // keep searching, don't add beyond 1
+      } else if (humanSunk >= 2) {
+        cap = 1; // allow one ship by this time
+      } else {
+        cap = 0;
+      }
+
+      if (cap > 4) cap = 4; // never let bot reach 5
+      return cap;
+    } catch (e) {
+      console.warn('getFairAllowedBotSinks error:', e.message);
+      return 0;
+    }
   }
 
   fireShot(playerId, position) {
