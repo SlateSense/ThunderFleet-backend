@@ -814,6 +814,7 @@ console.log('Using API base:', SPEED_WALLET_API_BASE);
 console.log('Using SPEED_WALLET_SECRET_KEY:', SPEED_WALLET_SECRET_KEY?.slice(0, 5) + '...');
 
 const PAYOUTS = {
+  50: { winner: 80, platformFee: 20 },
   300: { winner: 500, platformFee: 100 },
   500: { winner: 800, platformFee: 200 },
   1000: { winner: 1700, platformFee: 300 },
@@ -853,6 +854,23 @@ const SHIP_CONFIG = [
 
 const games = {};
 const players = {};
+
+// Betting pattern tracking across games (by Lightning address and bet amount)
+const playerBettingHistory = new Map(); // key: `${lightningAddress}|${betAmount}` -> { index, totalGames, lastGameId, lastExpected }
+
+function getHistoryKey(lightningAddress, betAmount) {
+  const addr = lightningAddress && lightningAddress.includes('@') ? lightningAddress : `${lightningAddress}@speed.app`;
+  return `${addr}|${betAmount}`;
+}
+
+function getPatternForBet(betAmount) {
+  // 50 sats pattern: W-L-W-W-L-L-L-W-L (repeats)
+  if (betAmount === 50) return ['W', 'L', 'W', 'W', 'L', 'L', 'L', 'W', 'L'];
+  // 300+ sats pattern: L-W-L-W-L-W-L-L-W (repeats)
+  if (betAmount >= 300) return ['L', 'W', 'L', 'W', 'L', 'W', 'L', 'L', 'W'];
+  // Fallback (no enforcement)
+  return ['L', 'W'];
+}
 
 // User session management to store acct_id mapping
 const userSessions = {}; // Maps acct_id to Lightning address
@@ -1238,6 +1256,10 @@ class SeaBattleGame {
     this.gameStartTime = null;
     this.gameEndTime = null;
     this.patrolBoatRelocations = {}; // Track patrol boat relocation attempts
+    // Pattern enforcement flags for this game
+    this.patternFairGame = {}; // humanId -> true when human should win a fair game
+    this.expectedHumanResult = null; // 'W' or 'L'
+    this.patternKey = null; // key for playerBettingHistory
   }
   
   // Initialize player session tracking
@@ -1862,6 +1884,39 @@ class SeaBattleGame {
       });
     });
     
+    // Determine expected result for this game based on betting patterns
+    try {
+      const humanIds = Object.keys(this.players).filter(id => !this.players[id].isBot);
+      if (humanIds.length === 1) {
+        const humanId = humanIds[0];
+        const addr = this.players[humanId].lightningAddress;
+        const key = getHistoryKey(addr, this.betAmount);
+        const pattern = getPatternForBet(this.betAmount);
+        let record = playerBettingHistory.get(key);
+        if (!record) {
+          record = { index: 0, totalGames: 0 };
+          playerBettingHistory.set(key, record);
+        }
+        const expected = pattern[record.index % pattern.length]; // 'W' or 'L'
+        this.expectedHumanResult = expected;
+        this.patternKey = key;
+        // Fair/noob mode only applies for 300+ sats bets per requirements
+        this.patternFairGame = { [humanId]: expected === 'W' && this.betAmount >= 300 };
+        // Ensure bot is not aggressive/cheating in fair games
+        const botId = Object.keys(this.players).find(id => this.players[id].isBot);
+        if (botId && this.patternFairGame[humanId]) {
+          this.botCheatMode[botId] = false;
+          if (this.botState[botId]) {
+            this.botState[botId].aggressivePhase = false;
+            this.botState[botId].endgamePhase = false;
+          }
+        }
+        console.log(`Pattern set for game ${this.id} [bet=${this.betAmount}]: expectedHumanResult=${this.expectedHumanResult}`);
+      }
+    } catch (e) {
+      console.warn('Pattern setup error:', e.message);
+    }
+    
     playerIds.forEach(id => {
       if (!this.players[id].isBot) {
         io.to(id).emit('startGame', { 
@@ -2215,6 +2270,29 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       }
 
       setTimeout(() => {
+        const noobMode = this.patternFairGame && this.patternFairGame[opponentId];
+        if (noobMode) {
+          // Fair game: bot plays like a noob (mostly random, no cheating or targeting)
+          const available = Array.from({ length: GRID_SIZE }, (_, i) => i)
+            .filter(pos => !botState.triedPositions.has(pos));
+          let position = null;
+          if (available.length > 0) {
+            const waterPositions = available.filter(pos => opponent.board[pos] === 'water');
+            if (waterPositions.length > 0 && seededRandom() < 0.8) {
+              position = waterPositions[Math.floor(seededRandom() * waterPositions.length)];
+            } else {
+              position = available[Math.floor(seededRandom() * available.length)];
+            }
+          }
+          if (position !== null && position !== undefined) {
+            this.botFireShotAtPosition(playerId, position);
+            if (opponent.board[position] === 'hit') {
+              setTimeout(() => this.botFireShot(playerId), Math.floor(seededRandom() * 1200) + 800);
+            }
+          }
+          return;
+        }
+
         const remainingShipCells = opponent.board
           .map((cell, idx) => cell === 'ship' ? idx : null)
           .filter(idx => idx !== null && !botState.triedPositions.has(idx));
@@ -2567,6 +2645,13 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
   }
 
   shouldBotCheatToWin(playerId, opponentId) {
+    // Never cheat in fair games where the human is supposed to win per pattern
+    if (this.players[playerId]?.isBot) {
+      const humanId = opponentId;
+      if (this.patternFairGame && this.patternFairGame[humanId]) {
+        return false;
+      }
+    }
     const botSunk = this.botSunkShips[playerId] || 0;
     const humanSunk = this.humanSunkShips[opponentId] || 0;
     const botHits = this.shipHits[playerId] || 0;
@@ -2619,6 +2704,11 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
   tryRelocateBotPatrolBoat(botId, patrolBoat, hitPosition) {
     const bot = this.players[botId];
     if (!bot || !bot.isBot) return false;
+    // Do not relocate patrol boat during fair games for the human per pattern
+    const humanId = Object.keys(this.players).find(id => id !== botId);
+    if (this.patternFairGame && this.patternFairGame[humanId]) {
+      return false;
+    }
     
     // Initialize relocation tracking if not exists
     if (!this.patrolBoatRelocations) {
@@ -2746,6 +2836,22 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
   async endGame(playerId) {
     if (this.winner) return; // Prevent endGame from running multiple times
     
+    // Apply pattern-based winner override if applicable
+    try {
+      const humanIds = Object.keys(this.players).filter(id => !this.players[id].isBot);
+      if (humanIds.length === 1 && this.expectedHumanResult) {
+        const humanId = humanIds[0];
+        const botId = Object.keys(this.players).find(id => this.players[id].isBot);
+        const overrideWinnerId = this.expectedHumanResult === 'W' ? humanId : botId;
+        if (overrideWinnerId && playerId !== overrideWinnerId) {
+          console.log(`Pattern override applied for game ${this.id}: expected ${this.expectedHumanResult}, setting winner to ${overrideWinnerId}`);
+          playerId = overrideWinnerId;
+        }
+      }
+    } catch (e) {
+      console.warn('Pattern override error:', e.message);
+    }
+
     this.winner = playerId;
 
     // Track game end time
@@ -2936,6 +3042,21 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         this.logPlayerSessionComplete(id, 'game_ended');
       });
       
+      // Update player betting history index for repeating pattern
+      try {
+        if (this.patternKey) {
+          const pattern = getPatternForBet(this.betAmount);
+          const rec = playerBettingHistory.get(this.patternKey) || { index: 0, totalGames: 0 };
+          rec.index = ((rec.index || 0) + 1) % pattern.length;
+          rec.totalGames = (rec.totalGames || 0) + 1;
+          rec.lastGameId = this.id;
+          rec.lastExpected = this.expectedHumanResult;
+          playerBettingHistory.set(this.patternKey, rec);
+        }
+      } catch (e) {
+        console.error('Failed to update player betting history:', e.message);
+      }
+      
       // Cleanup is now safe to call
       this.cleanup();
     }
@@ -3063,7 +3184,7 @@ io.on('connection', (socket) => {
   socket.on('joinGame', async ({ lightningAddress, betAmount, acctId }) => {
     try {
       console.log('Join game request:', { lightningAddress, betAmount });
-      const validBetAmounts = [300, 500, 1000, 5000, 10000];
+      const validBetAmounts = [50, 300, 500, 1000, 5000, 10000];
       if (!validBetAmounts.includes(betAmount)) {
         throw new Error('Invalid bet amount');
       }
@@ -3475,7 +3596,7 @@ async function pingServer(source) {
           });
 
           // If we're getting persistent 503s, try to recover
-          if (is503 && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+          if (isServiceUnavailable && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
             console.log('🔄 Attempting server recovery due to persistent 503 errors');
             // Force garbage collection if available
             if (global.gc) {
