@@ -138,6 +138,32 @@ const playerSessionLogger = winston.createLogger({
 
 // Function to log comprehensive player session data
 function logPlayerSession(lightningAddress, sessionData) {
+  // Compute derived values for better observability
+  const disconnectTimesArr = Array.isArray(sessionData.disconnectTimes) ? sessionData.disconnectTimes : [];
+  const reconnectTimesArr = Array.isArray(sessionData.reconnectTimes) ? sessionData.reconnectTimes : [];
+  const endIso = sessionData.gameEndTime || new Date().toISOString();
+  let totalDisconnectSeconds = 0;
+  for (let i = 0; i < disconnectTimesArr.length; i++) {
+    const start = new Date(disconnectTimesArr[i]);
+    const end = new Date(reconnectTimesArr[i] || endIso);
+    if (!isNaN(start) && !isNaN(end) && end > start) {
+      totalDisconnectSeconds += Math.floor((end - start) / 1000);
+    }
+  }
+
+  // Compute game duration if missing, fall back to joinTime when needed
+  let computedGameDuration = sessionData.gameDuration || null;
+  if (!computedGameDuration && sessionData.gameEndTime) {
+    const startIso = sessionData.gameStartTime || sessionData.joinTime || null;
+    if (startIso) {
+      const start = new Date(startIso);
+      const end = new Date(sessionData.gameEndTime);
+      if (!isNaN(start) && !isNaN(end) && end >= start) {
+        computedGameDuration = Math.floor((end - start) / 1000);
+      }
+    }
+  }
+
   const sessionEntry = {
     lightningAddress,
     timestamp: new Date().toISOString(),
@@ -150,9 +176,13 @@ function logPlayerSession(lightningAddress, sessionData) {
     paymentReceived: sessionData.paymentReceived || false,
     gameResult: sessionData.gameResult || null, // 'won', 'lost', 'disconnected'
     disconnectedDuringGame: sessionData.disconnectedDuringGame || false,
+    disconnectCount: sessionData.disconnectCount || 0,
+    disconnectTimes: disconnectTimesArr,
+    reconnectTimes: reconnectTimesArr,
+    totalDisconnectDurationSeconds: totalDisconnectSeconds,
     gameStartTime: sessionData.gameStartTime || null,
     gameEndTime: sessionData.gameEndTime || null,
-    gameDuration: sessionData.gameDuration || null,
+    gameDuration: computedGameDuration,
     opponentType: sessionData.opponentType || null, // 'human', 'bot'
     payoutAmount: sessionData.payoutAmount || 0,
     payoutStatus: sessionData.payoutStatus || null // 'sent', 'failed', 'not_applicable'
@@ -163,6 +193,7 @@ function logPlayerSession(lightningAddress, sessionData) {
   console.log('💰 Bet Amount:', sessionEntry.betAmount, 'SATS');
   console.log('🏆 Payout:', sessionEntry.payoutAmount, 'SATS');
   console.log('⏱️ Game Duration:', sessionEntry.gameDuration, 'seconds');
+  console.log('🔌 Disconnects:', sessionEntry.disconnectCount, 'events, total', sessionEntry.totalDisconnectDurationSeconds, 'seconds');
   console.log('🔗 Full Data:', JSON.stringify(sessionEntry, null, 2));
   console.log('----------------------------------------');
   
@@ -1318,11 +1349,35 @@ class SeaBattleGame {
   // Update player session data
   updatePlayerSession(playerId, updates) {
     if (this.playerSessions[playerId]) {
-      this.playerSessions[playerId] = {
-        ...this.playerSessions[playerId],
+      // Merge updates
+      const prev = this.playerSessions[playerId];
+      const merged = {
+        ...prev,
         ...updates,
         lastActivity: new Date().toISOString()
       };
+
+      // Infer opponentType if missing and two players are present
+      if (!merged.opponentType) {
+        const opponentId = Object.keys(this.players).find(id => id !== playerId);
+        if (opponentId) {
+          merged.opponentType = this.players[opponentId]?.isBot ? 'bot' : 'human';
+        }
+      }
+
+      // Compute gameDuration when possible. Prefer start->end, fallback to join->end.
+      if (!merged.gameDuration && merged.gameEndTime) {
+        const startIso = merged.gameStartTime || merged.joinTime;
+        if (startIso) {
+          const start = new Date(startIso);
+          const end = new Date(merged.gameEndTime);
+          if (!isNaN(start) && !isNaN(end) && end >= start) {
+            merged.gameDuration = Math.floor((end - start) / 1000);
+          }
+        }
+      }
+
+      this.playerSessions[playerId] = merged;
       
       // Log session update using Lightning address
       const lightningAddress = this.players[playerId]?.lightningAddress || playerId;
@@ -1330,7 +1385,7 @@ class SeaBattleGame {
         event: 'session_updated',
         playerId,
         updates,
-        ...this.playerSessions[playerId]
+        ...merged
       });
     }
   }
@@ -1342,12 +1397,30 @@ class SeaBattleGame {
       const opponentId = Object.keys(this.players).find(id => id !== playerId);
       const opponentType = opponentId ? (this.players[opponentId].isBot ? 'bot' : 'human') : 'unknown';
       
-      // Calculate game duration if both start and end times are available
+      // Calculate game duration. Prefer start->end, fallback to join->end.
       let gameDuration = null;
-      if (session.gameStartTime && session.gameEndTime) {
-        const startTime = new Date(session.gameStartTime);
-        const endTime = new Date(session.gameEndTime);
-        gameDuration = Math.floor((endTime - startTime) / 1000); // Duration in seconds
+      const haveEnd = !!session.gameEndTime;
+      if (haveEnd) {
+        const startIso = session.gameStartTime || session.joinTime || null;
+        if (startIso) {
+          const startTime = new Date(startIso);
+          const endTime = new Date(session.gameEndTime);
+          if (!isNaN(startTime) && !isNaN(endTime) && endTime >= startTime) {
+            gameDuration = Math.floor((endTime - startTime) / 1000);
+          }
+        }
+      }
+
+      // Total disconnect duration
+      const disconnectTimesArr = Array.isArray(session.disconnectTimes) ? session.disconnectTimes : [];
+      const reconnectTimesArr = Array.isArray(session.reconnectTimes) ? session.reconnectTimes : [];
+      let totalDisconnectSeconds = 0;
+      for (let i = 0; i < disconnectTimesArr.length; i++) {
+        const ds = new Date(disconnectTimesArr[i]);
+        const rs = new Date(reconnectTimesArr[i] || session.gameEndTime || new Date().toISOString());
+        if (!isNaN(ds) && !isNaN(rs) && rs > ds) {
+          totalDisconnectSeconds += Math.floor((rs - ds) / 1000);
+        }
       }
       
       const completeSessionData = {
@@ -1356,6 +1429,7 @@ class SeaBattleGame {
         playerId,
         opponentType,
         gameDuration,
+        totalDisconnectDurationSeconds: totalDisconnectSeconds,
         sessionEndTime: new Date().toISOString()
       };
       
@@ -1421,6 +1495,20 @@ class SeaBattleGame {
       });
       
       console.log(`Game ${this.id}: Both players joined, starting countdown`);
+      
+      // Update opponentType for both players now that both have joined
+      try {
+        const ids = Object.keys(this.players);
+        if (ids.length === 2) {
+          const [idA, idB] = ids;
+          const typeForA = this.players[idB]?.isBot ? 'bot' : 'human';
+          const typeForB = this.players[idA]?.isBot ? 'bot' : 'human';
+          this.updatePlayerSession(idA, { opponentType: typeForA });
+          this.updatePlayerSession(idB, { opponentType: typeForB });
+        }
+      } catch (e) {
+        console.warn('Failed to set opponentType on join:', e.message);
+      }
       
       // Send countdown updates
       let timeLeft = 5;
