@@ -69,6 +69,11 @@
             "date": 1755149647079,
             "name": "logs\\transactions-2025-08-14.log",
             "hash": "e1f5c91016575f4ca572b7158cfa9d9a6bed0ac4dd18108bcb263de93132fb88"
+        },
+        {
+            "date": 1755879481148,
+            "name": "logs\\transactions-2025-08-22.log",
+            "hash": "b808b38addd59d8b2f5e17c8bc6d6f27bf5a8e62c43efa348e48b07e4db83873"
         }
     ],
     "hashType": "sha256"

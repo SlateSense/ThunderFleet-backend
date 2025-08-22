@@ -64,6 +64,11 @@
             "date": 1755149647113,
             "name": "logs\\player-sessions-2025-08-14.log",
             "hash": "92d8acc742f4bd2e52acb7a6552622256b0bab246eec1e517824143e67c37659"
+        },
+        {
+            "date": 1755879481170,
+            "name": "logs\\player-sessions-2025-08-22.log",
+            "hash": "1b00808e4aa529115a62e8d2c6e13b20b07a17dc44913ef13ac72046474bb234"
         }
     ],
     "hashType": "sha256"
