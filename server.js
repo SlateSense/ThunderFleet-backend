@@ -611,8 +611,10 @@ console.log('Debug-2025-06-16-2: Socket.IO initialized');
 const SPEED_WALLET_API_BASE = 'https://api.tryspeed.com';
 const SPEED_API_BASE = 'https://api.tryspeed.com'; // For new Speed API
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
+const SPEED_WALLET_PUBLISHABLE_KEY = process.env.SPEED_WALLET_PUBLISHABLE_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
+const PUB_AUTH_HEADER = Buffer.from(`${SPEED_WALLET_PUBLISHABLE_KEY}:`).toString('base64');
 
 // Helper functions for player history and stats
 const fs = require('fs');
@@ -852,6 +854,11 @@ if (!SPEED_WALLET_SECRET_KEY) {
   process.exit(1);
 }
 
+if (!SPEED_WALLET_PUBLISHABLE_KEY) {
+  console.error('SPEED_WALLET_PUBLISHABLE_KEY is not set in environment variables');
+  process.exit(1);
+}
+
 if (!SPEED_WALLET_WEBHOOK_SECRET) {
   console.error('SPEED_WALLET_WEBHOOK_SECRET is not set in environment variables');
   process.exit(1);
@@ -1045,7 +1052,7 @@ async function createLightningInvoice(amountSats, customerId, orderId) {
     
     const response = await axios.post(`${SPEED_API_BASE}/payments`, newPayload, {
       headers: {
-        Authorization: `Basic ${AUTH_HEADER}`,
+        Authorization: `Basic ${PUB_AUTH_HEADER}`,
         'Content-Type': 'application/json',
       },
       timeout: 10000,
