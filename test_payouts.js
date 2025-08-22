@@ -46,7 +46,7 @@ Object.entries(PAYOUTS).forEach(([betAmount, payout]) => {
 console.log('\n=== Fixed Issues ===');
 console.log('✅ Removed USD conversion (was causing ~97% loss)');
 console.log('✅ Removed extra 1% winner fee');
-console.log('✅ Fixed platform address: slatesense@speed.app');
+console.log('✅ Fixed platform address: cyndaquil@speed.app');
 console.log('✅ Send SATS directly (no conversion losses)');
 
 console.log('\n=== Example for 300 SATS bet ===');

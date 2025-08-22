@@ -86,7 +86,7 @@ async function test50SatsInvoice() {
 async function testLightningAddressMinimum() {
   console.log('\n=== Testing Lightning Address Minimum Amount ===\n');
   
-  const address = 'slatesense@speed.app';
+  const address = 'cyndaquil@speed.app';
   const [username, domain] = address.split('@');
   const lnurl = `https://${domain}/.well-known/lnurlp/${username}`;
   

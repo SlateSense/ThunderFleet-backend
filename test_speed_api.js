@@ -86,7 +86,7 @@ async function runPaymentTests() {
   
   // Test different amounts
   const testCases = [
-    { address: 'slatesense@speed.app', amount: 500 },
+    { address: 'cyndaquil@speed.app', amount: 500 },
     { address: 'test@speed.app', amount: 1000 },
   ];
   

@@ -62,7 +62,7 @@ async function runTests() {
   
   // Test various payout amounts
   const testAmounts = [500, 800, 1700, 8000, 17000];
-  const testAddress = 'slatesense@speed.app';
+  const testAddress = 'cyndaquil@speed.app';
   
   for (const amount of testAmounts) {
     console.log(`\n--- Testing ${amount} SATS to ${testAddress} ---`);

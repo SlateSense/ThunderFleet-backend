@@ -85,11 +85,11 @@ async function testInstantSend() {
     },
     {
       name: 'Test with different lightning address',
-      withdrawRequest: 'slatesense@speed.app',
+      withdrawRequest: 'cyndaquil@speed.app',
       amount: 50,
       currency: 'SATS',
       targetCurrency: 'SATS',
-      note: 'Test to slatesense address'
+      note: 'Test to cyndaquil address'
     }
   ];
   

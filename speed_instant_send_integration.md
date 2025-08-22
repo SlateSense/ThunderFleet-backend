@@ -83,7 +83,7 @@ const winnerPayment = await sendInstantPayment(
 
 ### ✅ Working
 - **API Endpoint**: `/send` endpoint is correctly identified and accessible
-- **Lightning Addresses**: `vivekshah@speed.app`, `slatesense@speed.app` are recognized
+- **Lightning Addresses**: `vivekshah@speed.app`, `cyndaquil@speed.app` are recognized
 - **Request Format**: Payload structure is correct
 - **Error Handling**: Clear error messages for debugging
 

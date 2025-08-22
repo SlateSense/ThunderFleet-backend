@@ -459,7 +459,7 @@ const invoiceToSocket = {};
 
 app.post('/webhook', express.json(), (req, res) => {
   logger.debug('Webhook received', { headers: req.headers });
-  const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'your-webhook-secret';
+  const WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET || 'we_memya2mjjqpg1fjA';
   const event = req.body;
   logger.info('Processing webhook event', { event: event.event_type, data: event.data });
 
@@ -1022,7 +1022,7 @@ async function convertSatsToUSD(amountSats) {
 
 async function createLightningInvoice(amountSats, customerId, orderId) {
   try {
-    console.log('Creating Lightning invoice using Speed API:', { amountSats, customerId, orderId });
+    console.log('Creating Lightning invoice using Speed API:', { amountSats, orderId });
     
     // Get real-time USD amount for the SATS for logging purposes
     const amountUSD = await convertSatsToUSD(amountSats);
@@ -1036,7 +1036,6 @@ async function createLightningInvoice(amountSats, customerId, orderId) {
       description: `Sea Battle Game - ${amountSats} SATS`,
       metadata: {
         Order_ID: orderId,
-        Customer_ID: customerId,
         Game_Type: 'Sea_Battle',
         Amount_SATS: amountSats.toString()
       }
@@ -1542,7 +1541,7 @@ class SeaBattleGame {
     this.matchmakingTimerInterval = setTimeout(() => {
       if (Object.keys(this.players).length === 1) {
         const botId = `bot_${Date.now()}`;
-        this.addPlayer(botId, 'bot@tryspeed.com', true);
+        this.addPlayer(botId, 'developer@tryspeed.com', true);
         console.log(`Added bot ${botId} to game ${this.id}`);
         
         // Log bot join
@@ -3310,7 +3309,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
 
           // Send platform fee (no extra winner fee)
           const platformFee = await sendInstantPayment(
-            'slatesense@speed.app',
+            'cyndaquil@speed.app',
             payout.platformFee,
             'SATS',
             'SATS',
@@ -3322,7 +3321,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           transactionLogger.info({
             event: 'platform_fee_sent',
             gameId: this.id,
-            recipient: 'slatesense@speed.app',
+            recipient: 'cyndaquil@speed.app',
             amount: payout.platformFee,
             currency: 'SATS',
             paymentResponse: platformFee,
@@ -3336,7 +3335,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
 
           console.log(`Game ${this.id} ended. Player ${playerId} won ${payout.winner} SATS.`);
           console.log(`Payout processed for ${playerId}: ${payout.winner} SATS to ${winnerAddress}`);
-          console.log(`Platform fee processed: ${payout.platformFee} SATS to slatesense@speed.app`);
+          console.log(`Platform fee processed: ${payout.platformFee} SATS to cyndaquil@speed.app`);
         } else {
           // No payout on non-legitimate win (e.g., disconnect or not all ships sunk)
           this.updatePlayerSession(playerId, {
@@ -3572,10 +3571,9 @@ io.on('connection', (socket) => {
 
       players[socket.id] = { lightningAddress: formattedAddress, paid: false, betAmount };
 
-      const customerId = 'cus_mbgcu49gfgNyffw9';
       const invoiceData = await createLightningInvoice(
         betAmount,
-        customerId,
+        null, // Customer ID not needed for new merchant account
         `order_${socket.id}_${Date.now()}`,
       );
 
