@@ -613,8 +613,9 @@ const SPEED_API_BASE = 'https://api.tryspeed.com'; // For new Speed API
 const SPEED_WALLET_SECRET_KEY = process.env.SPEED_WALLET_SECRET_KEY;
 const SPEED_WALLET_PUBLISHABLE_KEY = process.env.SPEED_WALLET_PUBLISHABLE_KEY;
 const SPEED_WALLET_WEBHOOK_SECRET = process.env.SPEED_WALLET_WEBHOOK_SECRET;
+const SPEED_INVOICE_AUTH_MODE = (process.env.SPEED_INVOICE_AUTH_MODE || 'auto').toLowerCase(); // 'publishable' | 'secret' | 'auto'
 const AUTH_HEADER = Buffer.from(`${SPEED_WALLET_SECRET_KEY}:`).toString('base64');
-const PUB_AUTH_HEADER = Buffer.from(`${SPEED_WALLET_PUBLISHABLE_KEY}:`).toString('base64');
+const PUB_AUTH_HEADER = SPEED_WALLET_PUBLISHABLE_KEY ? Buffer.from(`${SPEED_WALLET_PUBLISHABLE_KEY}:`).toString('base64') : null;
 
 // Helper functions for player history and stats
 const fs = require('fs');
@@ -854,9 +855,15 @@ if (!SPEED_WALLET_SECRET_KEY) {
   process.exit(1);
 }
 
-if (!SPEED_WALLET_PUBLISHABLE_KEY) {
-  console.error('SPEED_WALLET_PUBLISHABLE_KEY is not set in environment variables');
+// Require publishable key only when explicitly in publishable mode.
+if (SPEED_INVOICE_AUTH_MODE === 'publishable' && !SPEED_WALLET_PUBLISHABLE_KEY) {
+  console.error('SPEED_INVOICE_AUTH_MODE is "publishable" but SPEED_WALLET_PUBLISHABLE_KEY is not set.');
   process.exit(1);
+}
+
+// Warn (but do not exit) if in auto mode without publishable key; we will fall back to secret.
+if (SPEED_INVOICE_AUTH_MODE === 'auto' && !SPEED_WALLET_PUBLISHABLE_KEY) {
+  console.warn('SPEED_INVOICE_AUTH_MODE=auto and SPEED_WALLET_PUBLISHABLE_KEY is missing. Will attempt secret key for invoice creation.');
 }
 
 if (!SPEED_WALLET_WEBHOOK_SECRET) {
@@ -1028,57 +1035,55 @@ async function convertSatsToUSD(amountSats) {
 }
 
 async function createLightningInvoice(amountSats, customerId, orderId) {
-  try {
-    console.log('Creating Lightning invoice using Speed API:', { amountSats, orderId });
-    
-    // Get real-time USD amount for the SATS for logging purposes
-    const amountUSD = await convertSatsToUSD(amountSats);
-    
-    // Use the new payments API with Speed Wallet interface - request payment directly in SATS
-    const newPayload = {
-      currency: 'SATS',
-      amount: amountSats,
-      target_currency: 'SATS',
-      ttl: 600, // 10 minutes for payment
-      description: `Sea Battle Game - ${amountSats} SATS`,
-      metadata: {
-        Order_ID: orderId,
-        Game_Type: 'Sea_Battle',
-        Amount_SATS: amountSats.toString()
-      }
-    };
+  const mode = (SPEED_INVOICE_AUTH_MODE || 'auto').toLowerCase();
+  const tryPublishable = mode !== 'secret';
+  const trySecret = mode !== 'publishable';
 
-    console.log('Creating payment with Speed API payload:', newPayload);
-    
-    const response = await axios.post(`${SPEED_API_BASE}/payments`, newPayload, {
+  const amountUSD = await convertSatsToUSD(amountSats);
+
+  const payload = {
+    currency: 'SATS',
+    amount: amountSats,
+    target_currency: 'SATS',
+    ttl: 600,
+    description: `Sea Battle Game - ${amountSats} SATS`,
+    metadata: {
+      Order_ID: orderId,
+      Game_Type: 'Sea_Battle',
+      Amount_SATS: amountSats.toString(),
+    },
+  };
+
+  async function attemptCreate(header, label, extraHeaders = {}) {
+    console.log(`Creating Lightning invoice via Speed (${label})`, { amountSats, orderId, mode });
+    const resp = await axios.post(`${SPEED_API_BASE}/payments`, payload, {
       headers: {
-        Authorization: `Basic ${PUB_AUTH_HEADER}`,
+        Authorization: `Basic ${header}`,
         'Content-Type': 'application/json',
+        ...extraHeaders,
       },
       timeout: 10000,
     });
 
-    console.log('Speed API response:', response.data);
-    
-    // Extract payment details from Speed API response
-    const paymentData = response.data;
-    const invoiceId = paymentData.id;
-    const hostedInvoiceUrl = paymentData.hosted_invoice_url;
-    
-    // Extract Lightning invoice from various possible locations
-    let lightningInvoice = paymentData.payment_method_options?.lightning?.payment_request ||
-                          paymentData.lightning_invoice || 
-                          paymentData.invoice || 
-                          paymentData.payment_request ||
-                          paymentData.bolt11;
-    
+    const data = resp.data;
+    const invoiceId = data.id;
+    const hostedInvoiceUrl = data.hosted_invoice_url;
+
+    let lightningInvoice =
+      data.payment_method_options?.lightning?.payment_request ||
+      data.lightning_invoice ||
+      data.invoice ||
+      data.payment_request ||
+      data.bolt11 ||
+      null;
+
     if (!lightningInvoice && hostedInvoiceUrl) {
-      console.log('No direct Lightning invoice found, will use hosted URL');
+      console.log(`[${label}] No direct Lightning invoice found; using hosted URL`);
       lightningInvoice = hostedInvoiceUrl;
     }
-    
+
     if (!invoiceId) {
-      throw new Error('No invoice ID returned from Speed API');
+      throw new Error(`[${label}] No invoice ID returned from Speed API`);
     }
 
     return {
@@ -1087,20 +1092,37 @@ async function createLightningInvoice(amountSats, customerId, orderId) {
       lightningInvoice,
       amountUSD,
       amountSats,
-      speedInterfaceUrl: hostedInvoiceUrl // This will open Speed Wallet interface
+      speedInterfaceUrl: hostedInvoiceUrl,
     };
-    
-  } catch (error) {
-    const errorMessage = error.response?.data?.errors?.[0]?.message || error.message;
-    const errorStatus = error.response?.status || 'No status';
-    const errorDetails = error.response?.data || error.message;
-    console.error('Create Invoice Error:', {
-      message: errorMessage,
-      status: errorStatus,
-      details: errorDetails,
-    });
-    throw new Error(`Failed to create invoice: ${errorMessage} (Status: ${errorStatus})`);
   }
+
+  // 1) Try publishable key first (no IP whitelist required)
+  if (tryPublishable && PUB_AUTH_HEADER) {
+    try {
+      return await attemptCreate(PUB_AUTH_HEADER, 'publishable');
+    } catch (error) {
+      const status = error.response?.status;
+      const msg = error.response?.data?.errors?.[0]?.message || error.message;
+      console.warn(`Publishable invoice attempt failed (${status || 'n/a'}): ${msg}`);
+      const shouldFallback = trySecret && [401, 403, 422].includes(Number(status));
+      if (!shouldFallback) {
+        throw new Error(`Failed to create invoice (publishable): ${msg} (Status: ${status || 'n/a'})`);
+      }
+    }
+  }
+
+  // 2) Fallback to secret key (pre-migration behavior; may require IP whitelist)
+  if (trySecret) {
+    try {
+      return await attemptCreate(AUTH_HEADER, 'secret', { 'speed-version': '2022-04-15' });
+    } catch (error) {
+      const status = error.response?.status;
+      const msg = error.response?.data?.errors?.[0]?.message || error.message;
+      throw new Error(`Failed to create invoice (secret): ${msg} (Status: ${status || 'n/a'})`);
+    }
+  }
+
+  throw new Error('No valid invoice auth mode available. Set SPEED_INVOICE_AUTH_MODE to publishable|secret|auto.');
 }
 
 async function resolveLightningAddress(address, amountSats, currency = 'SATS') {
