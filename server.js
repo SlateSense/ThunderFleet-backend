@@ -13,6 +13,8 @@ const rateLimit = require('express-rate-limit');
 const queue = require('express-queue');
 require('winston-daily-rotate-file');
 const logForwarder = require('./log-forwarder');
+const ChallengeManager = require('./challenges');
+const TournamentManager = require('./tournament');
 
 // Configure Winston logging
 const logger = winston.createLogger({
@@ -243,6 +245,7 @@ app.use(express.json());
 const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
+  trustProxy: false
 });
 
 app.get('/', (req, res) => {
@@ -355,6 +358,288 @@ app.get('/api/stats/:lightning_address', (req, res) => {
   } catch (error) {
     console.error('Error fetching player stats:', error);
     res.status(500).json({ error: 'Failed to fetch player stats' });
+  }
+});
+
+// Daily Challenges API Endpoints
+
+// Get today's challenges for a player
+app.get('/api/challenges/:lightning_address', (req, res) => {
+  try {
+    const { lightning_address } = req.params;
+    
+    if (!lightning_address) {
+      return res.status(400).json({ error: 'Lightning address is required' });
+    }
+    
+    const todaysChallenges = challengeManager.getTodaysChallenges();
+    const playerProgress = challengeManager.getPlayerProgress(lightning_address);
+    
+    // Combine challenges with player progress
+    const challengesWithProgress = todaysChallenges.map(challenge => ({
+      ...challenge,
+      progress: playerProgress.challenges[challenge.id]?.progress || 0,
+      completed: playerProgress.challenges[challenge.id]?.completed || false,
+      rewardClaimed: playerProgress.challenges[challenge.id]?.rewardClaimed || false
+    }));
+    
+    res.status(200).json({
+      lightning_address,
+      challenges: challengesWithProgress,
+      playerStats: playerProgress.stats,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error fetching challenges:', error);
+    res.status(500).json({ error: 'Failed to fetch challenges' });
+  }
+});
+
+// Claim reward for completed challenge
+app.post('/api/challenges/:lightning_address/claim', express.json(), async (req, res) => {
+  try {
+    const { lightning_address } = req.params;
+    const { challengeId } = req.body;
+    
+    if (!lightning_address || !challengeId) {
+      return res.status(400).json({ error: 'Lightning address and challenge ID are required' });
+    }
+    
+    const result = await challengeManager.claimReward(lightning_address, challengeId);
+    
+    if (result.success) {
+      res.status(200).json({
+        success: true,
+        message: `Reward of ${result.reward} sats claimed successfully!`,
+        reward: result.reward,
+        transactionId: result.transactionId
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error claiming reward:', error);
+    res.status(500).json({ error: 'Failed to claim reward' });
+  }
+});
+
+// Get player achievements
+app.get('/api/achievements/:lightning_address', (req, res) => {
+  try {
+    const { lightning_address } = req.params;
+    const achievements = challengeManager.getAchievementsWithProgress(lightning_address);
+    
+    res.status(200).json({
+      achievements,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error fetching achievements:', error);
+    res.status(500).json({ error: 'Failed to fetch achievements' });
+  }
+});
+
+// Claim achievement reward
+app.post('/api/achievements/:lightning_address/claim', express.json(), async (req, res) => {
+  try {
+    const { lightning_address } = req.params;
+    const { achievementId } = req.body;
+    
+    const result = challengeManager.claimAchievement(lightning_address, achievementId);
+    
+    if (result.success) {
+      // Here you could send payment via Speed Wallet if needed
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        reward: result.reward
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error claiming achievement:', error);
+    res.status(500).json({ error: 'Failed to claim achievement' });
+  }
+});
+
+// Get daily leaderboard
+app.get('/api/leaderboard', (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    const leaderboard = challengeManager.getLeaderboard(null, parseInt(limit));
+    
+    res.status(200).json({
+      leaderboard,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error fetching leaderboard:', error);
+    res.status(500).json({ error: 'Failed to fetch leaderboard' });
+  }
+});
+
+// Tournament API endpoints
+app.get('/api/tournaments/active', (req, res) => {
+  try {
+    const tournaments = tournamentManager.getActiveTournaments();
+    res.status(200).json({ tournaments });
+  } catch (error) {
+    console.error('Error fetching active tournaments:', error);
+    res.status(500).json({ error: 'Failed to fetch tournaments' });
+  }
+});
+
+// Admin-only tournament creation
+app.post('/api/admin/tournaments/create', (req, res) => {
+  try {
+    const { entryFee = 300, adminKey } = req.body;
+    
+    // Simple admin key check (you can replace this with proper authentication)
+    if (adminKey !== 'admin_thunder_fleet_2025') {
+      return res.status(403).json({ error: 'Unauthorized: Invalid admin key' });
+    }
+    
+    const tournament = tournamentManager.createTournament(entryFee);
+    res.status(200).json({ success: true, tournament });
+  } catch (error) {
+    console.error('Error creating tournament:', error);
+    res.status(500).json({ error: 'Failed to create tournament' });
+  }
+});
+
+// Admin-only tournament start (when 8 players joined)
+app.post('/api/admin/tournaments/:tournamentId/start', (req, res) => {
+  try {
+    const { tournamentId } = req.params;
+    const { adminKey, payouts } = req.body;
+    
+    if (adminKey !== 'admin_thunder_fleet_2025') {
+      return res.status(403).json({ error: 'Unauthorized: Invalid admin key' });
+    }
+    
+    const tournament = tournamentManager.getTournamentById(tournamentId);
+    if (!tournament) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+    
+    if (tournament.status !== 'registration') {
+      return res.status(400).json({ error: 'Tournament cannot be started' });
+    }
+    
+    if (tournament.players.length < 8) {
+      return res.status(400).json({ error: 'Tournament needs exactly 8 players to start' });
+    }
+    
+    // Update tournament with custom payouts if provided
+    if (payouts && payouts.length >= 3) {
+      tournament.payouts = {
+        first: payouts[0],
+        second: payouts[1], 
+        third: payouts[2]
+      };
+    } else {
+      // Default payout structure
+      const prizePool = tournament.prizePool;
+      tournament.payouts = {
+        first: Math.floor(prizePool * 0.6),   // 60%
+        second: Math.floor(prizePool * 0.25), // 25%
+        third: Math.floor(prizePool * 0.15)   // 15%
+      };
+    }
+    
+    const result = tournamentManager.startTournament(tournamentId);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error('Error starting tournament:', error);
+    res.status(500).json({ error: 'Failed to start tournament' });
+  }
+});
+
+// Admin dashboard endpoint
+app.get('/api/admin/tournaments', (req, res) => {
+  try {
+    const { adminKey } = req.query;
+    
+    if (adminKey !== 'admin_thunder_fleet_2025') {
+      return res.status(403).json({ error: 'Unauthorized: Invalid admin key' });
+    }
+    
+    const data = tournamentManager.getTournamentData();
+    res.status(200).json({ 
+      activeTournaments: Object.values(data.activeTournaments),
+      completedTournaments: data.completedTournaments
+    });
+  } catch (error) {
+    console.error('Error fetching admin tournaments:', error);
+    res.status(500).json({ error: 'Failed to fetch tournaments' });
+  }
+});
+
+app.post('/api/tournaments/:tournamentId/register', (req, res) => {
+  try {
+    const { tournamentId } = req.params;
+    const { lightningAddress, playerName } = req.body;
+    
+    const result = tournamentManager.registerPlayer(tournamentId, lightningAddress, playerName);
+    
+    if (result.success) {
+      res.status(200).json(result);
+    } else {
+      res.status(400).json(result);
+    }
+  } catch (error) {
+    console.error('Error registering for tournament:', error);
+    res.status(500).json({ error: 'Failed to register for tournament' });
+  }
+});
+
+app.get('/api/tournaments/:tournamentId', (req, res) => {
+  try {
+    const { tournamentId } = req.params;
+    const tournament = tournamentManager.getTournamentById(tournamentId);
+    
+    if (!tournament) {
+      return res.status(404).json({ error: 'Tournament not found' });
+    }
+    
+    res.status(200).json({ tournament });
+  } catch (error) {
+    console.error('Error fetching tournament:', error);
+    res.status(500).json({ error: 'Failed to fetch tournament' });
+  }
+});
+
+// Community Goals API endpoints
+app.get('/api/community-goals', (req, res) => {
+  try {
+    const goals = tournamentManager.getCurrentCommunityGoals();
+    res.status(200).json({ goals });
+  } catch (error) {
+    console.error('Error fetching community goals:', error);
+    res.status(500).json({ error: 'Failed to fetch community goals' });
+  }
+});
+
+app.post('/api/community-goals/update', (req, res) => {
+  try {
+    const { eventType, lightningAddress, data = {} } = req.body;
+    const goals = tournamentManager.updateCommunityGoals(eventType, lightningAddress, data);
+    res.status(200).json({ success: true, goals });
+  } catch (error) {
+    console.error('Error updating community goals:', error);
+    res.status(500).json({ error: 'Failed to update community goals' });
   }
 });
 
@@ -938,6 +1223,10 @@ function getPatternForBet(betAmount) {
 const userSessions = {}; // Maps acct_id to Lightning address
 const playerAcctIds = {}; // Maps playerId to acct_id
 
+// Initialize challenge manager and tournament manager
+const challengeManager = new ChallengeManager();
+const tournamentManager = new TournamentManager();
+
 // Function to store or retrieve acct_id for Lightning address
 function mapUserAcctId(acctId, lightningAddress) {
   userSessions[acctId] = lightningAddress;
@@ -1464,6 +1753,28 @@ class SeaBattleGame {
       // Use Lightning address for logging
       const lightningAddress = this.players[playerId]?.lightningAddress || playerId;
       logPlayerSession(lightningAddress, completeSessionData);
+      
+      // Update challenge progress if game ended
+      if (event === 'game_ended' && lightningAddress && lightningAddress !== playerId) {
+        try {
+          const gameData = {
+            result: completeSessionData.gameResult,
+            accuracy: completeSessionData.accuracy || 0,
+            duration: completeSessionData.gameDuration || 0,
+            shotsFired: completeSessionData.shotsFired || 0,
+            hits: completeSessionData.shotsHit || 0,
+            betAmount: completeSessionData.betAmount || 0
+          };
+          
+          const challengeResult = challengeManager.updatePlayerProgress(lightningAddress, gameData);
+          if (challengeResult.completedChallenges.length > 0) {
+            console.log(`🏆 Player ${lightningAddress} completed ${challengeResult.completedChallenges.length} challenges!`);
+          }
+        } catch (error) {
+          console.error('Error updating challenge progress:', error);
+        }
+      }
+      
       return completeSessionData;
     }
   }
@@ -3751,15 +4062,16 @@ io.on('connection', (socket) => {
   });
 });
 
-// Configure rate limiting
+// Configure rate limiting with trust proxy fix
 const limiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   max: 60, // limit each IP to 60 requests per windowMs
-  message: 'Too many requests, please try again later.'
+  message: 'Too many requests, please try again later.',
+  trustProxy: false // Fix for local development
 });
 
-// Apply rate limiting to all routes
-app.use(limiter);
+// Apply rate limiting to all routes (disabled for local development)
+// app.use(limiter);
 
 // Add request queuing to handle high load
 app.use(queue({ activeLimit: 50, queuedLimit: -1 }));
@@ -3868,7 +4180,7 @@ async function handleServerRecovery() {
   }
 }
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 3001;
 
 // Multiple keep-alive mechanisms with enhanced error handling
 let lastPingTime = Date.now();

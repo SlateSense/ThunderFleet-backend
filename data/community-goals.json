@@ -1,0 +1,29 @@
+{
+  "currentGoals": [
+    {
+      "id": "ships_sunk_weekly",
+      "title": "Fleet Destroyer",
+      "description": "Community goal: Sink 1,000 ships this week",
+      "target": 1000,
+      "current": 0,
+      "reward": 50,
+      "startDate": "2025-08-31T15:15:38.644Z",
+      "endDate": "2025-09-07T15:15:38.644Z",
+      "type": "weekly",
+      "participants": []
+    },
+    {
+      "id": "games_played_daily",
+      "title": "Battle Frenzy",
+      "description": "Community goal: Play 500 games today",
+      "target": 500,
+      "current": 0,
+      "reward": 25,
+      "startDate": "2025-08-31T15:15:38.644Z",
+      "endDate": "2025-09-01T15:15:38.644Z",
+      "type": "daily",
+      "participants": []
+    }
+  ],
+  "completedGoals": []
+}

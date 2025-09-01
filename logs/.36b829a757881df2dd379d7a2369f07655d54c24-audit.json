@@ -59,6 +59,21 @@
             "date": 1755879481152,
             "name": "logs\\games-2025-08-22.log",
             "hash": "a2dff05811866a2e788d3f9c6de392b82851e3243440328f0111ba7680721ca7"
+        },
+        {
+            "date": 1756481993890,
+            "name": "logs\\games-2025-08-29.log",
+            "hash": "b1742e2dafb6ade04ec20b4bd5ff1080181986b6ede70c8d1d92014493c97850"
+        },
+        {
+            "date": 1756530163613,
+            "name": "logs\\games-2025-08-30.log",
+            "hash": "52569607b75be230f5c0f820b891f0b7a33efc180ca96122000f75a998769fe5"
+        },
+        {
+            "date": 1756622246875,
+            "name": "logs\\games-2025-08-31.log",
+            "hash": "19c0d4fbeeba34f339bd1dbbb5154bf682c9673b3deca72fc5ec288e20bcec53"
         }
     ],
     "hashType": "sha256"
