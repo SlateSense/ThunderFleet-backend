@@ -42,6 +42,19 @@ class TournamentManager {
             type: 'community_event',
             participants: [],
             status: 'active'
+          },
+          {
+            id: 'games_played_daily',
+            title: 'Battle Frenzy',
+            description: 'Community goal: Play 500 games today',
+            target: 500,
+            current: 0,
+            reward: 100, // sats per participant
+            startDate: new Date().toISOString(),
+            endDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours to complete
+            type: 'daily',
+            participants: [],
+            status: 'active'
           }
         ],
         completedGoals: []
