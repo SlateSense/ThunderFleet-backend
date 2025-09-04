@@ -89,6 +89,16 @@
             "date": 1756622246889,
             "name": "logs\\transactions-2025-08-31.log",
             "hash": "38bdde73d95c88c0003e3b7f7ada755dcf367f7b610a68f04ff82a8e74b2a3b0"
+        },
+        {
+            "date": 1756907575471,
+            "name": "logs\\transactions-2025-09-03.log",
+            "hash": "e9bd57f876669e86cc16d95fa16bc0e0423582c0f4a7b890d1a87fdc2771f29a"
+        },
+        {
+            "date": 1756986365545,
+            "name": "logs\\transactions-2025-09-04.log",
+            "hash": "b42b4a0caca4b5fbb1fabf3b1e4e55e2804aeb10fcaffbe48759282a38961b33"
         }
     ],
     "hashType": "sha256"

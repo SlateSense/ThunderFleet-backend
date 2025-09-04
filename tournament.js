@@ -192,15 +192,31 @@ class TournamentManager {
   // Community Goals Management
   updateCommunityGoals(eventType, lightningAddress, data = {}) {
     const goalsData = this.getCommunityGoalsData();
+    // Reset any expired period-based goals before updating
+    const hadResets = this.resetExpiredGoals(goalsData);
     let updated = false;
 
     goalsData.currentGoals.forEach(goal => {
       if (this.shouldUpdateGoal(goal, eventType, data)) {
         goal.current += 1;
-        
-        // Add participant if not already included
-        if (!goal.participants.includes(lightningAddress)) {
+
+        // Ensure participants is an array
+        if (!Array.isArray(goal.participants)) {
+          goal.participants = [];
+        }
+
+        // Add single participant (if provided)
+        if (lightningAddress && !goal.participants.includes(lightningAddress)) {
           goal.participants.push(lightningAddress);
+        }
+
+        // Add any additional participants passed via data.participants
+        if (Array.isArray(data.participants)) {
+          data.participants.forEach(addr => {
+            if (addr && !goal.participants.includes(addr)) {
+              goal.participants.push(addr);
+            }
+          });
         }
 
         // Check if goal is completed
@@ -214,7 +230,7 @@ class TournamentManager {
       }
     });
 
-    if (updated) {
+    if (updated || hadResets) {
       this.saveCommunityGoalsData(goalsData);
     }
 
@@ -305,6 +321,52 @@ class TournamentManager {
     fs.writeFileSync(this.communityGoalsFile, JSON.stringify(data, null, 2));
   }
 
+  // Period handling for community goals
+  resetExpiredGoals(goalsData) {
+    try {
+      const now = new Date();
+      let changed = false;
+      goalsData.currentGoals.forEach(goal => {
+        if ((goal.type === 'daily' || goal.type === 'weekly' || goal.type === 'community_event') && new Date(goal.endDate) <= now) {
+          const { start, end } = this.computePeriodWindow(goal.type, now);
+          goal.current = 0;
+          goal.participants = [];
+          goal.status = 'active';
+          if (goal.completedAt) delete goal.completedAt;
+          goal.startDate = start.toISOString();
+          goal.endDate = end.toISOString();
+          changed = true;
+        }
+      });
+      return changed;
+    } catch (e) {
+      console.error('Error resetting expired goals:', e);
+      return false;
+    }
+  }
+
+  computePeriodWindow(type, now = new Date()) {
+    const d = new Date(now);
+    if (type === 'daily') {
+      const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+      const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+      return { start, end };
+    }
+    if (type === 'weekly') {
+      // Start of week: Monday 00:00 UTC
+      const day = d.getUTCDay(); // 0 (Sun) .. 6 (Sat)
+      const diffToMonday = (day + 6) % 7; // Sun->6, Mon->0, Tue->1, ...
+      const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+      start.setUTCDate(start.getUTCDate() - diffToMonday);
+      const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
+      return { start, end };
+    }
+    // Default fallback: 30 days from now
+    const start = new Date(now);
+    const end = new Date(start.getTime() + 30 * 24 * 60 * 60 * 1000);
+    return { start, end };
+  }
+
   // Public API Methods
   getActiveTournaments() {
     const data = this.getTournamentData();
@@ -313,6 +375,10 @@ class TournamentManager {
 
   getCurrentCommunityGoals() {
     const goalsData = this.getCommunityGoalsData();
+    const changed = this.resetExpiredGoals(goalsData);
+    if (changed) {
+      this.saveCommunityGoalsData(goalsData);
+    }
     return goalsData.currentGoals.filter(goal => {
       const now = new Date();
       const goalEnd = new Date(goal.endDate);

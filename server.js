@@ -3244,6 +3244,21 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
           this.updatePlayerSession(playerId, {
             shipsDestroyed: (this.playerSessions[playerId]?.shipsDestroyed || 0) + 1
           });
+
+          // Community Goal: ship sunk (count both human and bot sinks)
+          try {
+            const shooter = this.players[playerId];
+            if (shooter) {
+              const addr = shooter.lightningAddress || '';
+              tournamentManager.updateCommunityGoals('ship_sunk', addr, { 
+                shipName: sunkShip.name, 
+                gameId: this.id,
+                isBot: shooter.isBot || false
+              });
+            }
+          } catch (e) {
+            console.error('Failed to update community goal on ship_sunk:', e.message);
+          }
         }
       }
     }
@@ -3586,7 +3601,7 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
         });
         console.log(`Bot ${playerId} won the game. Bet amount ${this.betAmount} SATS retained by the house.`);
       } else {
-        // Log human victory and payout details (payout only if human legitimately sank all bot ships)
+        // Log human victory and payout details (payout only if human legitimately sunk all bot ships)
         const legitimateHumanWin = humanId && playerId === humanId && humanHasSunkAllBotShips;
         gameLogger.info({
           event: 'game_ended',
@@ -3723,6 +3738,17 @@ if (Math.random() < 0.05 && shipPositions.length > 0) {
       console.log(`Failed to process payment in game ${this.id} for player ${playerId}: ${error.message}`);
       io.to(this.id).emit('error', { message: `Payment processing failed: ${error.message}` });
     } finally {
+      // Community Goal: game completed (add human participants)
+      try {
+        const humanParticipants = Object.keys(this.players)
+          .filter(id => !this.players[id].isBot)
+          .map(id => this.players[id].lightningAddress)
+          .filter(Boolean);
+        const primary = humanParticipants[0] || null;
+        tournamentManager.updateCommunityGoals('game_completed', primary, { participants: humanParticipants, gameId: this.id, betAmount: this.betAmount });
+      } catch (e) {
+        console.error('Failed to update community goal on game_completed:', e.message);
+      }
       // Log comprehensive game summary
       logGameSummary(this.id, this.players, playerId, this.betAmount, this.gameStartTime, this.gameEndTime);
       
