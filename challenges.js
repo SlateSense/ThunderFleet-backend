@@ -727,6 +727,11 @@ class ChallengeManager {
       const leaderboard = [];
       
       for (const [lightningAddress, playerData] of Object.entries(data)) {
+        // Skip old bot addresses from appearing in leaderboard
+        if (lightningAddress === 'developer@tryspeed.com' || lightningAddress === 'developer@tryspeed.app') {
+          continue;
+        }
+        
         if (playerData[today]) {
           const stats = playerData[today].stats;
           leaderboard.push({

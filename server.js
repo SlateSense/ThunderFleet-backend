@@ -1881,8 +1881,19 @@ class SeaBattleGame {
     this.matchmakingTimerInterval = setTimeout(() => {
       if (Object.keys(this.players).length === 1) {
         const botId = `bot_${Date.now()}`;
-        this.addPlayer(botId, 'developer@tryspeed.com', true);
-        console.log(`Added bot ${botId} to game ${this.id}`);
+        // Array of random bot Lightning addresses to make it less obvious they're playing the same bot
+        const botAddresses = [
+          'technoblade@speed.app',
+          'elephant@speed.app', 
+          'changpegzhao@speed.app',
+          'muzan@speed.app',
+          'eminem@speed.app',
+          'rupee@speed.app',
+          'vegetagoku@speed.app'
+        ];
+        const randomBotAddress = botAddresses[Math.floor(Math.random() * botAddresses.length)];
+        this.addPlayer(botId, randomBotAddress, true);
+        console.log(`Added bot ${botId} (${randomBotAddress}) to game ${this.id}`);
         
         // Log bot join
         gameLogger.info({
